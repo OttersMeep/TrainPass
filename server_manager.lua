@@ -37,7 +37,7 @@ print("")
 
 -- Save data to disk
 function serverManager.save()
-    local file = fs.open(serverManager.config.storageFile, "w")
+    local file = fs.open(serverManager.config.dataFile, "w")
     if file then
         file.write(textutils.serialize({
             registeredMachines = serverManager.registeredMachines

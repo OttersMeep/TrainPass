@@ -242,6 +242,14 @@ else
     main = basalt.createFrame()
 end
 
+-- Get terminal size
+local termWidth, termHeight
+if monitor then
+    termWidth, termHeight = monitor.getSize()
+else
+    termWidth, termHeight = term.getSize()
+end
+
 -- Colors
 local colorBg = colors.gray
 local colorPrimary = colors.blue
@@ -252,7 +260,7 @@ local colorText = colors.white
 -- Home Screen
 local homeFrame = main:addFrame()
     :setPosition(1, 1)
-    :setSize("parent.w", "parent.h")
+    :setSize(termWidth, termHeight)
     :setBackground(colorBg)
 
 homeFrame:addLabel()
@@ -291,7 +299,7 @@ local loginBtn = homeFrame:addButton()
 -- Menu Screen
 local menuFrame = main:addFrame()
     :setPosition(1, 1)
-    :setSize("parent.w", "parent.h")
+    :setSize(termWidth, termHeight)
     :setBackground(colorBg)
     :setVisible(false)
 
@@ -341,7 +349,7 @@ local logoutBtn = menuFrame:addButton()
 -- Deposit Screen
 local depositFrame = main:addFrame()
     :setPosition(1, 1)
-    :setSize("parent.w", "parent.h")
+    :setSize(termWidth, termHeight)
     :setBackground(colorBg)
     :setVisible(false)
 
@@ -382,7 +390,7 @@ local depositCancelBtn = depositFrame:addButton()
 -- Withdraw Screen
 local withdrawFrame = main:addFrame()
     :setPosition(1, 1)
-    :setSize("parent.w", "parent.h")
+    :setSize(termWidth, termHeight)
     :setBackground(colorBg)
     :setVisible(false)
 
