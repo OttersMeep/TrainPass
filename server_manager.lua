@@ -70,7 +70,7 @@ function serverManager.requestKeypair()
     print("Requesting keypair from key generator...")
     
     modem.transmit(serverManager.config.keyGenChannel, serverManager.config.responseChannel, textutils.serialize({
-        requestType = "GENERATE_KEYPAIR",
+        action = "GENERATE_KEYPAIR",
         timestamp = os.epoch("utc")
     }))
     
