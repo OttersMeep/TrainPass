@@ -293,7 +293,7 @@ local menuFrame = main:addFrame()
     :setPosition(1, 1)
     :setSize("parent.w", "parent.h")
     :setBackground(colorBg)
-    :hide()
+    :setVisible(false)
 
 menuFrame:addLabel()
     :setText("Account Menu")
@@ -343,7 +343,7 @@ local depositFrame = main:addFrame()
     :setPosition(1, 1)
     :setSize("parent.w", "parent.h")
     :setBackground(colorBg)
-    :hide()
+    :setVisible(false)
 
 depositFrame:addLabel()
     :setText("Load Balance")
@@ -384,7 +384,7 @@ local withdrawFrame = main:addFrame()
     :setPosition(1, 1)
     :setSize("parent.w", "parent.h")
     :setBackground(colorBg)
-    :hide()
+    :setVisible(false)
 
 withdrawFrame:addLabel()
     :setText("Withdraw Diamonds")
@@ -441,8 +441,8 @@ loginBtn:onClick(function()
         atm.currentBalance = balance
         menuAccountLabel:setText("Account: " .. accountId)
         menuBalanceLabel:setText("Balance: " .. balance)
-        homeFrame:hide()
-        menuFrame:show()
+        homeFrame:setVisible(false)
+        menuFrame:setVisible(true)
     else
         statusLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -471,8 +471,8 @@ depositBtn:onClick(function()
     -- Unlock hopper (allow items to enter)
     redstone.setOutput(atm.config.inventorySide, false)
     
-    menuFrame:hide()
-    depositFrame:show()
+    menuFrame:setVisible(false)
+    depositFrame:setVisible(true)
 end)
 
 -- Confirm deposit
@@ -481,8 +481,8 @@ depositConfirmBtn:onClick(function()
     redstone.setOutput(atm.config.inventorySide, true)
     
     if atm.diamondsInserted == 0 then
-        depositFrame:hide()
-        menuFrame:show()
+        depositFrame:setVisible(false)
+        menuFrame:setVisible(true)
         return
     end
     
@@ -493,8 +493,8 @@ depositConfirmBtn:onClick(function()
     if success then
         atm.currentBalance = balance
         menuBalanceLabel:setText("Balance: " .. balance)
-        depositFrame:hide()
-        menuFrame:show()
+        depositFrame:setVisible(false)
+        menuFrame:setVisible(true)
     else
         depositCountLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -506,16 +506,16 @@ depositCancelBtn:onClick(function()
     redstone.setOutput(atm.config.inventorySide, true)
     
     atm.diamondsInserted = 0
-    depositFrame:hide()
-    menuFrame:show()
+    depositFrame:setVisible(false)
+    menuFrame:setVisible(true)
 end)
 
 -- Go to withdraw screen
 withdrawBtn:onClick(function()
     withdrawInput:setValue("")
     withdrawValueLabel:setText("Cost: 0")
-    menuFrame:hide()
-    withdrawFrame:show()
+    menuFrame:setVisible(false)
+    withdrawFrame:setVisible(true)
 end)
 
 -- Update withdraw cost
@@ -545,8 +545,8 @@ withdrawConfirmBtn:onClick(function()
     if success then
         atm.currentBalance = balance
         menuBalanceLabel:setText("Balance: " .. balance)
-        withdrawFrame:hide()
-        menuFrame:show()
+        withdrawFrame:setVisible(false)
+        menuFrame:setVisible(true)
     else
         withdrawValueLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -554,8 +554,8 @@ end)
 
 -- Cancel withdrawal
 withdrawCancelBtn:onClick(function()
-    withdrawFrame:hide()
-    menuFrame:show()
+    withdrawFrame:setVisible(false)
+    menuFrame:setVisible(true)
 end)
 
 -- Logout
@@ -564,8 +564,8 @@ logoutBtn:onClick(function()
     atm.currentBalance = 0
     accountInput:setValue("")
     statusLabel:setText("")
-    menuFrame:hide()
-    homeFrame:show()
+    menuFrame:setVisible(false)
+    homeFrame:setVisible(true)
 end)
 
 -- Helper: Check if item is a diamond
