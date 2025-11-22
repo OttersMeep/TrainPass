@@ -229,8 +229,7 @@ end
 local main
 if monitor then
     -- Use monitor for UI
-    basalt.setMonitor(monitor)
-    main = basalt.createFrame()
+    main = basalt.createFrame():setTerm(monitor)
     term.clear()
     term.setCursorPos(1, 1)
     print("=== TrainPass ATM ===")
