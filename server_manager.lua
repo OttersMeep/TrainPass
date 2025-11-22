@@ -156,18 +156,11 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         return false, "No disk inserted in drive"
     end
     
-    print("  Mounting disk on " .. diskSide)
-    disk.mount(diskSide)
-    
     print("  Getting mount path for disk on " .. diskSide)
     local mountPath = disk.getMountPath(diskSide)
     if not mountPath then
-        -- Try waiting a bit more
-        sleep(0.5)
-        mountPath = disk.getMountPath(diskSide)
-        if not mountPath then
-            return false, "Could not get disk mount path"
-        end
+        return false, "Could not get disk mount path"
+    end
     end
     
     print("  Writing to disk at: " .. mountPath)
@@ -330,12 +323,10 @@ function serverManager.waitForDisk()
         sleep(0.1)
     end
     
-    print("  Disk detected, mounting...")
-    
-    -- Mount the disk (important for computers in disk drives)
-    disk.mount(serverManager.config.diskSide)
+    print("  Disk detected, waiting for mount...")
     
     -- Wait for disk to fully mount and get a valid mount path
+    -- (Computers auto-mount when inserted, but it takes a moment)
     local mountPath = nil
     start = os.epoch("utc")
     while not mountPath do
