@@ -161,7 +161,6 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
     if not mountPath then
         return false, "Could not get disk mount path"
     end
-    end
     
     print("  Writing to disk at: " .. mountPath)
     
@@ -190,9 +189,12 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         local templateContent = template.readAll()
         template.close()
         
+        -- Serialize the private key (it's a byte table)
+        local serializedPrivateKey = textutils.serialize(privateKey)
+        
         -- Replace placeholders with actual values
         templateContent = templateContent:gsub("%%MACHINE_ID%%", machineId)
-        templateContent = templateContent:gsub("%%PRIVATE_KEY%%", privateKey)
+        templateContent = templateContent:gsub("%%PRIVATE_KEY%%", serializedPrivateKey)
         templateContent = templateContent:gsub("%%MACHINE_TYPE%%", machineType)
         templateContent = templateContent:gsub("%%GATEWAY_CHANNEL%%", tostring(config.gatewayChannel or 1000))
         
@@ -210,7 +212,7 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         configFile.writeLine("")
         configFile.writeLine("return {")
         configFile.writeLine('    machineId = "' .. machineId .. '",')
-        configFile.writeLine('    privateKey = "' .. privateKey .. '",')
+        configFile.writeLine('    privateKey = ' .. textutils.serialize(privateKey) .. ',')
         configFile.writeLine('    machineType = "' .. machineType .. '",')
         
         -- Add additional config options
