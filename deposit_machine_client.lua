@@ -22,11 +22,10 @@ atm.config = {
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
     dispenserSide = "back",  -- Side to pulse for dispensing diamonds
-    detectorSide = "bottom",  -- Side that receives signal when diamond inserted
-    lockSide = "right",  -- Side that outputs redstone to lock diamond intake (off when deposit active)
+    inventorySide = "right",  -- Side with hopper for diamond detection (also receives lock signal)
+    monitorSide = "top",  -- Side with monitor (default top, auto-detect if nil)
     gatewayChannel = 1000,
-    responseChannel = nil,  -- Will be set dynamically
-    monitorSide = nil  -- Side of monitor (nil = auto-detect, or set to "top", "left", etc.)
+    responseChannel = nil  -- Will be set dynamically
 }
 
 -- Load configuration from machine_config.lua if it exists
@@ -37,8 +36,7 @@ if fs.exists("machine_config.lua") then
         atm.config.privateKey = machineConfig.privateKey or atm.config.privateKey
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
         atm.config.dispenserSide = machineConfig.dispenserSide or atm.config.dispenserSide
-        atm.config.detectorSide = machineConfig.detectorSide or atm.config.detectorSide
-        atm.config.lockSide = machineConfig.lockSide or atm.config.lockSide
+        atm.config.inventorySide = machineConfig.inventorySide or atm.config.inventorySide
         atm.config.gatewayChannel = machineConfig.gatewayChannel or atm.config.gatewayChannel
         atm.config.monitorSide = machineConfig.monitorSide or atm.config.monitorSide
     end
@@ -48,6 +46,14 @@ end
 if atm.config.privateKey == "" then
     error("Private key not configured! Edit deposit_machine_client.lua or machine_config.lua")
 end
+
+-- Find inventory (hopper on right)
+local inventory = peripheral.wrap(atm.config.inventorySide)
+if not inventory then
+    error("No inventory found on " .. atm.config.inventorySide .. " side! Need hopper for diamond detection.")
+end
+
+print("Inventory detected: " .. peripheral.getType(atm.config.inventorySide))
 
 -- Find monitor
 local monitor = nil
@@ -83,8 +89,9 @@ end
 atm.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(atm.config.responseChannel)
 
--- Initialize lock (locked by default - prevents diamond insertion)
-redstone.setOutput(atm.config.lockSide, true)
+-- Initialize hopper lock (locked by default - prevents items from entering)
+-- Redstone output on the same side as the hopper
+redstone.setOutput(atm.config.inventorySide, true)
 
 -- State
 atm.currentAccount = nil
@@ -461,8 +468,8 @@ depositBtn:onClick(function()
     depositCountLabel:setText("Diamonds inserted: 0")
     depositValueLabel:setText("Value: 0")
     
-    -- Unlock diamond intake
-    redstone.setOutput(atm.config.lockSide, false)
+    -- Unlock hopper (allow items to enter)
+    redstone.setOutput(atm.config.inventorySide, false)
     
     menuFrame:hide()
     depositFrame:show()
@@ -470,8 +477,8 @@ end)
 
 -- Confirm deposit
 depositConfirmBtn:onClick(function()
-    -- Lock diamond intake
-    redstone.setOutput(atm.config.lockSide, true)
+    -- Lock hopper (prevent more items)
+    redstone.setOutput(atm.config.inventorySide, true)
     
     if atm.diamondsInserted == 0 then
         depositFrame:hide()
@@ -495,8 +502,8 @@ end)
 
 -- Cancel deposit
 depositCancelBtn:onClick(function()
-    -- Lock diamond intake
-    redstone.setOutput(atm.config.lockSide, true)
+    -- Lock hopper (prevent more items)
+    redstone.setOutput(atm.config.inventorySide, true)
     
     atm.diamondsInserted = 0
     depositFrame:hide()
@@ -561,23 +568,103 @@ logoutBtn:onClick(function()
     homeFrame:show()
 end)
 
--- Diamond detection thread
+-- Helper: Check if item is a diamond
+local function isDiamond(itemName)
+    return itemName == "minecraft:diamond"
+end
+
+-- Helper: Clear inventory
+local function clearInventory()
+    local size = inventory.size()
+    for slot = 1, size do
+        local item = inventory.getItemDetail(slot)
+        if item then
+            inventory.pushItems(atm.config.dispenserSide, slot)
+        end
+    end
+end
+
+-- Diamond detection thread using inventory API
 local function diamondDetectionThread()
+    local depositActive = false
+    local errorMessage = nil
+    
     while true do
-        if depositFrame:isVisible() then
-            -- Check for diamond insertion (redstone signal on bottom)
-            if redstone.getInput(atm.config.detectorSide) then
-                atm.diamondsInserted = atm.diamondsInserted + 1
-                depositCountLabel:setText("Diamonds inserted: " .. atm.diamondsInserted)
-                depositValueLabel:setText("Value: " .. (atm.diamondsInserted * atm.config.diamondValue))
-                
-                -- Wait for signal to clear
-                while redstone.getInput(atm.config.detectorSide) do
-                    sleep(0.1)
+        local wasDepositActive = depositActive
+        depositActive = depositFrame:isVisible()
+        
+        -- Just entered deposit screen
+        if depositActive and not wasDepositActive then
+            -- Reset state
+            atm.diamondsInserted = 0
+            errorMessage = nil
+            -- Start with hopper unlocked
+            redstone.setOutput(atm.config.inventorySide, false)
+        end
+        
+        -- Just left deposit screen
+        if not depositActive and wasDepositActive then
+            -- Lock hopper
+            redstone.setOutput(atm.config.inventorySide, true)
+        end
+        
+        if depositActive then
+            -- Check for items in inventory
+            local hasItem = false
+            for slot = 1, inventory.size() do
+                local item = inventory.getItemDetail(slot)
+                if item then
+                    hasItem = true
+                    break
                 end
             end
+            
+            if hasItem then
+                -- Lock hopper while processing
+                redstone.setOutput(atm.config.inventorySide, true)
+                
+                -- Check all items
+                local validDiamonds = 0
+                local invalidItems = 0
+                
+                for slot = 1, inventory.size() do
+                    local item = inventory.getItemDetail(slot)
+                    if item then
+                        if isDiamond(item.name) then
+                            validDiamonds = validDiamonds + item.count
+                            -- Remove diamonds from inventory
+                            inventory.pushItems(atm.config.dispenserSide, slot)
+                        else
+                            invalidItems = invalidItems + 1
+                            -- Return invalid item
+                            inventory.pushItems(atm.config.dispenserSide, slot)
+                        end
+                    end
+                end
+                
+                if validDiamonds > 0 then
+                    atm.diamondsInserted = atm.diamondsInserted + validDiamonds
+                    depositCountLabel:setText("Diamonds inserted: " .. atm.diamondsInserted)
+                    depositValueLabel:setText("Value: " .. (atm.diamondsInserted * atm.config.diamondValue))
+                        :setForeground(colors.green)
+                    errorMessage = nil
+                end
+                
+                if invalidItems > 0 then
+                    errorMessage = "Invalid item(s) rejected!"
+                    depositValueLabel:setText(errorMessage)
+                        :setForeground(colors.red)
+                end
+                
+                -- Wait a moment before unlocking again
+                sleep(0.3)
+                
+                -- Unlock hopper for next item
+                redstone.setOutput(atm.config.inventorySide, false)
+            end
         end
-        sleep(0.1)
+        
+        sleep(0.05)
     end
 end
 
