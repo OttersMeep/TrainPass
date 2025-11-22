@@ -18,7 +18,7 @@ local atm = {}
 
 -- Configuration (will be overridden by machine_config.lua if it exists)
 atm.config = {
-    machineId = "DEPOSIT_001",
+    machineId = "DEPOSIT_005",
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
     dispenserSide = "back",  -- Side to pulse for dispensing diamonds
