@@ -401,7 +401,6 @@ local withdrawInput = withdrawFrame:addInput()
     :setSize(10, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
-    :setInputType("number")
 
 local withdrawValueLabel = withdrawFrame:addLabel()
     :setText("Cost: 0")
@@ -669,8 +668,6 @@ local function diamondDetectionThread()
 end
 
 -- Start threads
-basalt.setVariable("exitKey", keys.x)  -- Press X to exit for debugging
-
 parallel.waitForAny(
     function()
         basalt.autoUpdate()
