@@ -156,10 +156,21 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         return false, "No disk inserted in drive"
     end
     
+    print("  Mounting disk on " .. diskSide)
+    disk.mount(diskSide)
+    
+    print("  Getting mount path for disk on " .. diskSide)
     local mountPath = disk.getMountPath(diskSide)
     if not mountPath then
-        return false, "Could not get disk mount path"
+        -- Try waiting a bit more
+        sleep(0.5)
+        mountPath = disk.getMountPath(diskSide)
+        if not mountPath then
+            return false, "Could not get disk mount path"
+        end
     end
+    
+    print("  Writing to disk at: " .. mountPath)
     
     -- Copy ecc.lua library
     if fs.exists("ecc.lua") then
@@ -310,6 +321,8 @@ function serverManager.waitForDisk()
     local timeout = 10  -- 10 seconds
     local start = os.epoch("utc")
     
+    print("  Waiting for disk on side: " .. serverManager.config.diskSide)
+    
     while not disk.isPresent(serverManager.config.diskSide) do
         if os.epoch("utc") - start > timeout * 1000 then
             return false, "Timeout waiting for disk"
@@ -317,8 +330,23 @@ function serverManager.waitForDisk()
         sleep(0.1)
     end
     
-    -- Extra wait for disk to fully mount
-    sleep(0.3)
+    print("  Disk detected, mounting...")
+    
+    -- Mount the disk (important for computers in disk drives)
+    disk.mount(serverManager.config.diskSide)
+    
+    -- Wait for disk to fully mount and get a valid mount path
+    local mountPath = nil
+    start = os.epoch("utc")
+    while not mountPath do
+        if os.epoch("utc") - start > timeout * 1000 then
+            return false, "Timeout waiting for disk to mount"
+        end
+        sleep(0.1)
+        mountPath = disk.getMountPath(serverManager.config.diskSide)
+    end
+    
+    print("  Disk mounted at: " .. mountPath)
     return true
 end
 
