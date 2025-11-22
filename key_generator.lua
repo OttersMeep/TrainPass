@@ -30,11 +30,8 @@ end
 function keyGenerator.generateKeypair(accountId)
     local ecc = require("ecc")
     
-    -- Generate random private key
-    local privateKey = ecc.random.random()
-    
-    -- Generate public key from private key
-    local publicKey = ecc.publicKey(privateKey)
+    -- Generate keypair (random if no accountId seed)
+    local privateKey, publicKey = ecc.keypair()
     
     -- Store in history
     table.insert(keyGenerator.generatedKeys, {
