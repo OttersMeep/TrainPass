@@ -229,6 +229,8 @@ end
 local main
 if monitor then
     -- Use monitor for UI
+    -- Set text scale to make it larger and easier to read
+    monitor.setTextScale(0.5)
     main = basalt.createFrame():setTerm(monitor)
     term.clear()
     term.setCursorPos(1, 1)
@@ -242,7 +244,7 @@ else
     main = basalt.createFrame()
 end
 
--- Get terminal size
+-- Get terminal size (after setting text scale)
 local termWidth, termHeight
 if monitor then
     termWidth, termHeight = monitor.getSize()
@@ -256,6 +258,9 @@ local colorPrimary = colors.blue
 local colorSuccess = colors.green
 local colorError = colors.red
 local colorText = colors.white
+
+-- Frame visibility tracking
+local currentScreen = "home"  -- "home", "menu", "deposit", "withdraw"
 
 -- Home Screen
 local homeFrame = main:addFrame()
@@ -450,6 +455,7 @@ loginBtn:onClick(function()
         menuBalanceLabel:setText("Balance: " .. balance)
         homeFrame:setVisible(false)
         menuFrame:setVisible(true)
+        currentScreen = "menu"
     else
         statusLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -480,6 +486,7 @@ depositBtn:onClick(function()
     
     menuFrame:setVisible(false)
     depositFrame:setVisible(true)
+    currentScreen = "deposit"
 end)
 
 -- Confirm deposit
@@ -490,6 +497,7 @@ depositConfirmBtn:onClick(function()
     if atm.diamondsInserted == 0 then
         depositFrame:setVisible(false)
         menuFrame:setVisible(true)
+        currentScreen = "menu"
         return
     end
     
@@ -502,6 +510,7 @@ depositConfirmBtn:onClick(function()
         menuBalanceLabel:setText("Balance: " .. balance)
         depositFrame:setVisible(false)
         menuFrame:setVisible(true)
+        currentScreen = "menu"
     else
         depositCountLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -515,6 +524,7 @@ depositCancelBtn:onClick(function()
     atm.diamondsInserted = 0
     depositFrame:setVisible(false)
     menuFrame:setVisible(true)
+    currentScreen = "menu"
 end)
 
 -- Go to withdraw screen
@@ -523,6 +533,7 @@ withdrawBtn:onClick(function()
     withdrawValueLabel:setText("Cost: 0")
     menuFrame:setVisible(false)
     withdrawFrame:setVisible(true)
+    currentScreen = "withdraw"
 end)
 
 -- Update withdraw cost
@@ -554,6 +565,7 @@ withdrawConfirmBtn:onClick(function()
         menuBalanceLabel:setText("Balance: " .. balance)
         withdrawFrame:setVisible(false)
         menuFrame:setVisible(true)
+        currentScreen = "menu"
     else
         withdrawValueLabel:setText("Error: " .. balance):setForeground(colorError)
     end
@@ -563,6 +575,7 @@ end)
 withdrawCancelBtn:onClick(function()
     withdrawFrame:setVisible(false)
     menuFrame:setVisible(true)
+    currentScreen = "menu"
 end)
 
 -- Logout
@@ -573,6 +586,7 @@ logoutBtn:onClick(function()
     statusLabel:setText("")
     menuFrame:setVisible(false)
     homeFrame:setVisible(true)
+    currentScreen = "home"
 end)
 
 -- Helper: Check if item is a diamond
@@ -598,7 +612,7 @@ local function diamondDetectionThread()
     
     while true do
         local wasDepositActive = depositActive
-        depositActive = depositFrame:isVisible()
+        depositActive = (currentScreen == "deposit")
         
         -- Just entered deposit screen
         if depositActive and not wasDepositActive then
