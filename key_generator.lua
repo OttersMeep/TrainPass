@@ -53,11 +53,19 @@ end
 
 -- Handle incoming requests
 function keyGenerator.handleRequest(message)
+    print("Received message: " .. tostring(message))
     local request = textutils.unserialize(message)
-    if not request then return nil end
+    if not request then 
+        print("Failed to unserialize message")
+        return nil 
+    end
+    
+    print("Request action: " .. tostring(request.action))
     
     if request.action == "GENERATE_KEYPAIR" then
+        print("Generating keypair...")
         local keys = keyGenerator.generateKeypair(request.accountId)
+        print("Keypair generated successfully")
         return {
             success = true,
             publicKey = keys.publicKey,
@@ -65,6 +73,7 @@ function keyGenerator.handleRequest(message)
         }
     end
     
+    print("Unknown action: " .. tostring(request.action))
     return { success = false, error = "Unknown action" }
 end
 
