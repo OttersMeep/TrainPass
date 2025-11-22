@@ -229,7 +229,7 @@ end
 local main
 if monitor then
     -- Use monitor for UI
-    -- Set text scale to make it larger and easier to read
+    -- Set text scale to 0.5 to make text smaller and fit more on screen
     monitor.setTextScale(0.5)
     main = basalt.createFrame():setTerm(monitor)
     term.clear()
