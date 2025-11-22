@@ -68,6 +68,8 @@ end
 -- Request keypair from key generator
 function serverManager.requestKeypair()
     print("Requesting keypair from key generator...")
+    print("  Sending to channel: " .. serverManager.config.keyGenChannel)
+    print("  Reply channel: " .. serverManager.config.responseChannel)
     
     modem.transmit(serverManager.config.keyGenChannel, serverManager.config.responseChannel, textutils.serialize({
         action = "GENERATE_KEYPAIR",
@@ -80,13 +82,15 @@ function serverManager.requestKeypair()
         local event, side, channel, replyChannel, message, distance = os.pullEvent()
         
         if event == "modem_message" and channel == serverManager.config.responseChannel then
+            print("  Received response on channel " .. channel)
             local response = textutils.unserialize(message)
+            print("  Response: " .. textutils.serialize(response))
             if response and response.success then
                 os.cancelTimer(timer)
                 return response.publicKey, response.privateKey
             elseif response and not response.success then
                 os.cancelTimer(timer)
-                return nil, nil, response.error
+                return nil, nil, response.error or "Unknown error"
             end
         elseif event == "timer" and side == timer then
             return nil, nil, "Timeout waiting for keypair"
