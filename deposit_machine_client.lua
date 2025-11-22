@@ -670,7 +670,7 @@ end
 -- Start threads
 parallel.waitForAny(
     function()
-        basalt.autoUpdate()
+        basalt.run()
     end,
     diamondDetectionThread
 )
