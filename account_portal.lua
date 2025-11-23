@@ -115,6 +115,7 @@ function portal.waitForResponse(timeout)
                 -- Decrypt using shared secret
                 local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, portal.sharedSecret)
                 if success then
+                    portal.log(decrypted)
                     local response = textutils.unserialize(decrypted)
                     return response
                 else
@@ -128,6 +129,31 @@ function portal.waitForResponse(timeout)
             portal.waitingForResponse = false
             return nil, "Timeout"
         end
+    end
+end
+
+local debugMonitor = peripheral.find("monitor")
+if debugMonitor then
+    debugMonitor.setTextScale(0.5)
+    debugMonitor.clear()
+    debugMonitor.setCursorPos(1,1)
+    debugMonitor.write("Debug Monitor Active")
+    local _, h = debugMonitor.getSize()
+    debugMonitor.setCursorPos(1, 2)
+end
+
+function portal.log(text)
+    if not debugMonitor then return end
+    local w, h = debugMonitor.getSize()
+    local x, y = debugMonitor.getCursorPos()
+    
+    debugMonitor.write(tostring(text))
+    
+    if y >= h then
+        debugMonitor.scroll(1)
+        debugMonitor.setCursorPos(1, h)
+    else
+        debugMonitor.setCursorPos(1, y + 1)
     end
 end
 
