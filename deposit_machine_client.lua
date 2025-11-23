@@ -160,8 +160,23 @@ function atm.waitForResponse(timeout)
         if event == "modem_message" and p2 == atm.config.responseChannel then
             os.cancelTimer(timer)
             atm.waitingForResponse = false
-            local response = textutils.unserialize(p4)
-            return response
+            local packet = textutils.unserialize(p4)
+            
+            -- Handle encrypted packet from gateway
+            if packet and type(packet) == "table" and packet.encryptedData then
+                -- Decrypt using shared secret
+                local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, atm.sharedSecret)
+                if success then
+                    local response = textutils.unserialize(decrypted)
+                    return response
+                else
+                    print("Error: Failed to decrypt response from gateway")
+                    return nil, "Decryption failed"
+                end
+            end
+            
+            -- Fallback for unencrypted messages (legacy or plain errors)
+            return packet
         elseif event == "timer" and p1 == timer then
             atm.waitingForResponse = false
             return nil, "Timeout"

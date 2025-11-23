@@ -2,6 +2,7 @@
 -- Interfaces between wireless modems (external) and wired modems (internal servers)
 -- Encrypts outgoing messages, decrypts incoming messages
 -- Verifies signatures from deposit machines
+-- MULTI-THREADED: Handles concurrent requests
 
 local ecc = require("ecc")
 
@@ -18,13 +19,11 @@ gateway.publicKey = nil
 -- Channels
 gateway.wirelessChannel = 1000 -- External channel for wireless clients
 gateway.wiredChannel = 105 -- Gateway's internal wired channel
-gateway.balanceManagerChannel = 102 -- Balance manager's channel
+gateway.balanceManagerChannel = 101 -- Balance manager's channel
 gateway.ledgerChannel = 100
 
--- Deposit machine registry (machineId -> publicKey)
-gateway.depositMachines = {}
-
-
+-- Machine registry (machineId -> publicKey)
+gateway.depositMachines = {} 
 
 -- Initialize
 function gateway.init()
@@ -83,33 +82,52 @@ function gateway.init()
     print("Balance Manager channel: " .. gateway.balanceManagerChannel)
 end
 
--- Register a deposit machine
+-- Register a machine
 function gateway.registerDepositMachine(machineId, publicKey)
     gateway.depositMachines[machineId] = publicKey
-    print("Registered deposit machine: " .. machineId)
+    print("Registered machine: " .. machineId)
 end
 
 -- Verify deposit machine signature
 function gateway.verifyDepositSignature(machineId, message, signature)
     local publicKey = gateway.depositMachines[machineId]
     if not publicKey then
-        return false, "Deposit machine not registered"
+        return false, "Machine not registered"
     end
     
-    local ecc = require("ecc")
     local isValid = ecc.verify(publicKey, message, signature)
     
     return isValid, isValid and nil or "Invalid signature"
 end
 
 -- Encrypt message for wireless transmission (outgoing to clients)
-function gateway.encryptMessage(message)
+function gateway.encryptMessage(message, machineId)
+    -- If machineId is provided, we encrypt specifically for that machine using ECDH
+    if machineId then
+        local machinePublicKey = gateway.depositMachines[machineId]
+        if machinePublicKey then
+            -- Derive shared secret
+            local sharedSecret = ecc.exchange(gateway.privateKey, machinePublicKey)
+            local serializedData = textutils.serialize(message)
+            -- Encrypt data
+            local encryptedData = ecc.encrypt(serializedData, sharedSecret)
+            
+            local packet = {
+                encryptedData = encryptedData,
+                timestamp = os.epoch("utc")
+            }
+            return textutils.serialize(packet)
+        else
+            print("WARNING: No public key found for " .. tostring(machineId) .. ", falling back to signing")
+        end
+    end
+
+    -- Fallback: Sign with gateway's private key for authenticity (no encryption)
     local packet = {
         data = message,
         timestamp = os.epoch("utc")
     }
     
-    -- Sign with gateway's private key for authenticity
     local signature = ecc.sign(gateway.privateKey, textutils.serialize(packet))
     packet.signature = signature
     
@@ -153,17 +171,63 @@ function gateway.decryptMessage(encryptedMessage)
         return nil, "Invalid decrypted data format"
     end
     
-    return data, nil
+    -- Return data AND machineId so we know who to reply to
+    return data, nil, packet.machineId
+end
+
+-- Send wireless response
+function gateway.sendWireless(channel, data, machineId)
+    local encrypted = gateway.encryptMessage(data, machineId)
+    gateway.wirelessModem.transmit(channel, gateway.wirelessChannel, encrypted)
+end
+
+function gateway.sendWired(channel, data)
+    gateway.wiredModem.transmit(channel, gateway.wiredChannel, textutils.serialize(data))
+end
+
+-- Helper: Send request to balance manager using ephemeral channel for concurrency
+-- This ensures that responses go to the correct thread
+function gateway.sendToBalanceManager(request)
+    local tempChannel = math.random(20000, 65000)
+    -- Ensure channel is not one of our main ones
+    while tempChannel == gateway.wiredChannel or tempChannel == gateway.wirelessChannel do
+        tempChannel = math.random(20000, 65000)
+    end
+    
+    gateway.wiredModem.open(tempChannel)
+    
+    gateway.wiredModem.transmit(
+        gateway.balanceManagerChannel,
+        tempChannel,
+        textutils.serialize(request)
+    )
+    
+    local timer = os.startTimer(10)
+    local response = nil
+    
+    while true do
+        local event, side, channel, replyChannel, message = os.pullEvent()
+        
+        if event == "modem_message" and channel == tempChannel then
+            response = textutils.unserialize(message)
+            break
+        elseif event == "timer" and side == timer then
+            break -- Timeout, response remains nil
+        end
+    end
+    
+    gateway.wiredModem.close(tempChannel)
+    return response
 end
 
 -- Handle deposit request from wireless
-function gateway.handleDepositRequest(data, replyChannel)
+function gateway.handleDepositRequest(data, replyChannel, machineId)
     -- Verify it's from a registered deposit machine
     if not data.depositMachineId or not data.signature then
         gateway.sendWireless(replyChannel, {
             success = false,
             error = "Missing machine ID or signature"
-        })
+        }, machineId)
         return
     end
     
@@ -181,7 +245,7 @@ function gateway.handleDepositRequest(data, replyChannel)
         gateway.sendWireless(replyChannel, {
             success = false,
             error = "Signature verification failed: " .. (err or "unknown")
-        })
+        }, machineId)
         print("Rejected deposit from " .. data.depositMachineId .. ": " .. (err or "unknown"))
         return
     end
@@ -195,80 +259,41 @@ function gateway.handleDepositRequest(data, replyChannel)
         signature = data.signature
     }
     
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
+    local response = gateway.sendToBalanceManager(request)
     
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wirelessChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            
-            if response and response.success then
-                print(string.format("Deposit: %d to %s via %s", 
-                    data.amount, data.accountId, data.depositMachineId))
-            end
-            return
-        elseif event == "timer" and side == timer then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+        if response.success then
+            print(string.format("Deposit: %d to %s via %s", 
+                data.amount, data.accountId, data.depositMachineId))
         end
+    else
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Internal server timeout"
+        }, machineId)
     end
 end
 
 -- Handle card payment request
-function gateway.handleCardPayment(data, replyChannel)
+function gateway.handleCardPayment(data, replyChannel, machineId)
     -- Get account by card UUID
     local getAccountReq = {
         action = "GET_ACCOUNT_BY_CARD",
         cardUUID = data.cardUUID
     }
     
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(getAccountReq)
-    )
+    local accountResponse = gateway.sendToBalanceManager(getAccountReq)
     
-    -- Wait for account info
-    local timer = os.startTimer(5)
-    local accountId = nil
-    
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wirelessChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            
-            if not response or not response.success or not response.account then
-                gateway.sendWireless(replyChannel, {
-                    success = false,
-                    error = "Card not registered"
-                })
-                return
-            end
-            
-            accountId = response.account.accountId
-            break
-        elseif event == "timer" and side == timer then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
+    if not accountResponse or not accountResponse.success or not accountResponse.account then
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Card not registered"
+        }, machineId)
+        return
     end
+    
+    local accountId = accountResponse.account.accountId
     
     -- Charge the vendor
     local chargeReq = {
@@ -280,56 +305,195 @@ function gateway.handleCardPayment(data, replyChannel)
         metadata = data.metadata or {}
     }
     
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(chargeReq)
-    )
+    local chargeResponse = gateway.sendToBalanceManager(chargeReq)
     
-    -- Wait for charge response
-    timer = os.startTimer(5)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wirelessChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            
-            if response and response.success then
-                print(string.format("Card payment: %d from card %s at %s", 
-                    data.amount, data.cardUUID:sub(1, 8), data.vendorId))
-            end
-            return
-        elseif event == "timer" and side == timer then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
+    if chargeResponse then
+        gateway.sendWireless(replyChannel, chargeResponse, machineId)
+        if chargeResponse.success then
+            print(string.format("Card payment: %d from card %s at %s", 
+                data.amount, data.cardUUID:sub(1, 8), data.vendorId))
         end
+    else
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Internal server timeout"
+        }, machineId)
     end
 end
 
--- Send wireless response
-function gateway.sendWireless(channel, data)
-    local encrypted = gateway.encryptMessage(data, nil)
-    gateway.wirelessModem.transmit(channel, gateway.wirelessChannel, encrypted)
+-- Handle GET_ACCOUNT_BY_CARD request
+function gateway.handleGetAccountByCard(data, replyChannel, machineId)
+    if not data.cardUUID then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing cardUUID" }, machineId)
+        return
+    end
+    
+    local request = { action = "GET_ACCOUNT_BY_CARD", cardUUID = data.cardUUID }
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response and response.success and response.account then
+        gateway.sendWireless(replyChannel, {
+            success = true,
+            accountId = response.account.accountId
+        }, machineId)
+    else
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = response and response.error or "Card not registered"
+        }, machineId)
+    end
 end
 
-function gateway.sendWired(channel, data)
-    gateway.wiredModem.transmit(channel, gateway.wiredChannel, textutils.serialize(data))
+-- Handle CREATE_ACCOUNT request
+function gateway.handleCreateAccount(data, replyChannel, machineId)
+    print("DEBUG [Gateway]: handleCreateAccount called")
+    
+    if not data.username or not data.password then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing username or password" }, machineId)
+        return
+    end
+    
+    -- Hash the password server-side
+    local ecc = require("ecc")
+    local passwordHash = ecc.sha256.digest(data.password):toHex()
+    
+    local request = {
+        action = "CREATE_ACCOUNT",
+        username = data.username,
+        passwordHash = passwordHash,
+        publicKey = nil,
+        initialBalance = 0,
+        cardUUIDs = {}
+    }
+    
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+-- Handle LOGIN request
+function gateway.handleLogin(data, replyChannel, machineId)
+    print("DEBUG [Gateway]: handleLogin called")
+    
+    if not data.username or not data.password then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing username or password" }, machineId)
+        return
+    end
+    
+    local ecc = require("ecc")
+    local passwordHash = ecc.sha256.digest(data.password):toHex()
+    
+    local request = {
+        action = "LOGIN",
+        username = data.username,
+        passwordHash = passwordHash
+    }
+    
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+-- Handle GET_ACCOUNT_BY_USERNAME request
+function gateway.handleGetAccountByUsername(data, replyChannel, machineId)
+    if not data.username then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing username" }, machineId)
+        return
+    end
+    
+    local request = { action = "GET_ACCOUNT_BY_USERNAME", username = data.username }
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+-- Handle ADD_CARD request
+function gateway.handleAddCard(data, replyChannel, machineId)
+    if not data.accountId or not data.cardUUID then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing accountId or cardUUID" }, machineId)
+        return
+    end
+    
+    local request = { action = "ADD_CARD", accountId = data.accountId, cardUUID = data.cardUUID }
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+-- Handle REMOVE_CARD request
+function gateway.handleRemoveCard(data, replyChannel, machineId)
+    if not data.accountId or not data.cardUUID then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing accountId or cardUUID" }, machineId)
+        return
+    end
+    
+    local request = { action = "REMOVE_CARD", accountId = data.accountId, cardUUID = data.cardUUID }
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+-- Handle GET_ACCOUNT request
+function gateway.handleGetAccount(data, replyChannel, machineId)
+    if not data.accountId then
+        gateway.sendWireless(replyChannel, { success = false, error = "Missing accountId" }, machineId)
+        return
+    end
+    
+    local request = { action = "GET_ACCOUNT", accountId = data.accountId }
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, { success = false, error = "Internal server timeout" }, machineId)
+    end
+end
+
+
+-- Handle wired message (from internal servers)
+function gateway.handleWiredMessage(message, replyChannel)
+    local data = textutils.unserialize(message)
+    
+    if not data then return end
+    
+    -- Route based on request type
+    if data.requestType == "REGISTER_MACHINE" then
+        gateway.handleMachineRegistration(data, replyChannel)
+    elseif data.requestType == "GET_PUBLIC_KEY" then
+        -- Return the gateway's public key for encryption
+        gateway.sendWired(replyChannel, {
+            success = true,
+            publicKey = gateway.publicKey
+        })
+    end
 end
 
 -- Handle machine registration (from wired network - server manager)
 function gateway.handleMachineRegistration(data, replyChannel)
     print("DEBUG: handleMachineRegistration called")
-    print("  machineId: " .. tostring(data.machineId))
-    print("  publicKey exists: " .. tostring(data.publicKey ~= nil))
-    print("  replyChannel: " .. tostring(replyChannel))
     
     if not data.machineId or not data.publicKey then
-        print("  ERROR: Missing data, sending failure")
         gateway.wiredModem.transmit(replyChannel, gateway.wiredChannel, textutils.serialize({
             success = false,
             error = "Missing machineId or publicKey"
@@ -345,484 +509,148 @@ function gateway.handleMachineRegistration(data, replyChannel)
     
     print("Registered machine: " .. data.machineId)
     
-    -- Send success response to the replyChannel (not balanceManagerChannel)
+    -- Send success response
     local response = {
         success = true,
         machineId = data.machineId
     }
-    print("  Sending response: " .. textutils.serialize(response))
-    print("  To channel: " .. replyChannel)
     gateway.wiredModem.transmit(replyChannel, gateway.wiredChannel, textutils.serialize(response))
-    print("  Response sent!")
 end
 
 -- Handle wireless message
 function gateway.handleWirelessMessage(message, replyChannel)
     print("DEBUG [Gateway]: Received wireless message on reply channel " .. replyChannel)
     
-    local data, err = gateway.decryptMessage(message)
-    
-    print("DEBUG [Gateway]: Decryption result - data: " .. tostring(data ~= nil) .. ", err: " .. tostring(err))
+    -- Decrypt and get machineId
+    local data, err, machineId = gateway.decryptMessage(message)
     
     if not data then
-        print("DEBUG [Gateway]: Decryption failed, sending error response")
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = err or "Decryption failed"
-        })
+        print("DEBUG [Gateway]: Decryption failed: " .. tostring(err))
+        gateway.sendWireless(replyChannel, { success = false, error = err or "Decryption failed" }, nil)
         return
     end
     
-    print("DEBUG [Gateway]: Request type: " .. tostring(data.requestType))
+    print("DEBUG [Gateway]: Request type: " .. tostring(data.requestType) .. " from " .. tostring(machineId))
     
     -- Route based on request type
     if data.requestType == "DEPOSIT" then
-        gateway.handleDepositRequest(data, replyChannel)
+        gateway.handleDepositRequest(data, replyChannel, machineId)
     elseif data.requestType == "CARD_PAYMENT" then
-        gateway.handleCardPayment(data, replyChannel)
+        gateway.handleCardPayment(data, replyChannel, machineId)
     elseif data.requestType == "GET_ACCOUNT_BY_CARD" then
-        gateway.handleGetAccountByCard(data, replyChannel)
+        gateway.handleGetAccountByCard(data, replyChannel, machineId)
     elseif data.requestType == "CREATE_ACCOUNT" then
-        print("DEBUG [Gateway]: Routing to handleCreateAccount")
-        gateway.handleCreateAccount(data, replyChannel)
+        gateway.handleCreateAccount(data, replyChannel, machineId)
     elseif data.requestType == "GET_ACCOUNT_BY_USERNAME" then
-        gateway.handleGetAccountByUsername(data, replyChannel)
+        gateway.handleGetAccountByUsername(data, replyChannel, machineId)
     elseif data.requestType == "ADD_CARD" then
-        gateway.handleAddCard(data, replyChannel)
+        gateway.handleAddCard(data, replyChannel, machineId)
     elseif data.requestType == "REMOVE_CARD" then
-        gateway.handleRemoveCard(data, replyChannel)
+        gateway.handleRemoveCard(data, replyChannel, machineId)
     elseif data.requestType == "GET_ACCOUNT" then
-        gateway.handleGetAccount(data, replyChannel)
+        gateway.handleGetAccount(data, replyChannel, machineId)
+    elseif data.requestType == "LOGIN" then
+        gateway.handleLogin(data, replyChannel, machineId)
     else
         print("DEBUG [Gateway]: Unknown request type")
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Unknown request type"
-        })
+        gateway.sendWireless(replyChannel, { success = false, error = "Unknown request type" }, machineId)
     end
 end
 
--- Handle GET_ACCOUNT_BY_CARD request
-function gateway.handleGetAccountByCard(data, replyChannel)
-    print(textutils.serialize(data))
-    if not data.cardUUID then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing cardUUID"
-        })
-        return
-    end
-    
-    -- Forward to balance manager
-    local request = {
-        action = "GET_ACCOUNT_BY_CARD",
-        cardUUID = data.cardUUID
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            
-            if response and response.success and response.account then
-                gateway.sendWireless(replyChannel, {
-                    success = true,
-                    accountId = response.account.accountId
-                })
-            else
-                gateway.sendWireless(replyChannel, {
-                    success = false,
-                    error = response and response.error or "Card not registered"
-                })
-            end
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle CREATE_ACCOUNT request
-function gateway.handleCreateAccount(data, replyChannel)
-    print("DEBUG [Gateway]: handleCreateAccount called")
-    print("  username: " .. tostring(data.username))
-    print("  password: " .. (data.password and "***" or "nil"))
-    print("  replyChannel: " .. tostring(replyChannel))
-    
-    if not data.username then
-        print("DEBUG [Gateway]: Missing username, sending error")
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing username"
-        })
-        return
-    end
-    
-    if not data.password then
-        print("DEBUG [Gateway]: Missing password, sending error")
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing password"
-        })
-        return
-    end
-    
-    -- Hash the password server-side
-    local ecc = require("ecc")
-    local passwordHash = ecc.sha256.digest(data.password):toHex()
-    
-    -- Forward to balance manager
-    local request = {
-        action = "CREATE_ACCOUNT",
-        username = data.username,
-        passwordHash = passwordHash,
-        publicKey = nil,  -- Portal accounts don't need public keys
-        initialBalance = 0,
-        cardUUIDs = {}  -- Empty initially, cards added later
-    }
-    
-    print("DEBUG [Gateway]: Sending to balance manager on channel " .. gateway.balanceManagerChannel)
-    print("  Request: " .. textutils.serialize(request))
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wiredChannel,
-        textutils.serialize(request)
-    )
-    
-    print("DEBUG [Gateway]: Waiting for response from balance manager...")
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            print("DEBUG [Gateway]: Received response from balance manager")
-            local response = textutils.unserialize(message)
-            print("  Response: " .. textutils.serialize(response))
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            print("DEBUG [Gateway]: Timeout waiting for balance manager")
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle LOGIN request
-function gateway.handleLogin(data, replyChannel)
-    print("DEBUG [Gateway]: handleLogin called")
-    print("  username: " .. tostring(data.username))
-    print("  password: " .. (data.password and "***" or "nil"))
-    
-    if not data.username or not data.password then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing username or password"
-        })
-        return
-    end
-    
-    -- Hash the password server-side
-    local ecc = require("ecc")
-    local passwordHash = ecc.sha256.digest(data.password):toHex()
-    
-    -- Forward to balance manager
-    local request = {
-        action = "LOGIN",
-        username = data.username,
-        passwordHash = passwordHash
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wiredChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle GET_ACCOUNT_BY_USERNAME request
-function gateway.handleGetAccountByUsername(data, replyChannel)
-    if not data.username then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing username"
-        })
-        return
-    end
-    
-    -- Need to search through all accounts - forward to balance manager
-    local request = {
-        action = "GET_ACCOUNT_BY_USERNAME",
-        username = data.username
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle ADD_CARD request
-function gateway.handleAddCard(data, replyChannel)
-    if not data.accountId or not data.cardUUID then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing accountId or cardUUID"
-        })
-        return
-    end
-    
-    -- Forward to balance manager
-    local request = {
-        action = "ADD_CARD",
-        accountId = data.accountId,
-        cardUUID = data.cardUUID
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle REMOVE_CARD request
-function gateway.handleRemoveCard(data, replyChannel)
-    if not data.accountId or not data.cardUUID then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing accountId or cardUUID"
-        })
-        return
-    end
-    
-    -- Forward to balance manager
-    local request = {
-        action = "REMOVE_CARD",
-        accountId = data.accountId,
-        cardUUID = data.cardUUID
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
--- Handle GET_ACCOUNT request
-function gateway.handleGetAccount(data, replyChannel)
-    if not data.accountId then
-        gateway.sendWireless(replyChannel, {
-            success = false,
-            error = "Missing accountId"
-        })
-        return
-    end
-    
-    -- Forward to balance manager
-    local request = {
-        action = "GET_ACCOUNT",
-        accountId = data.accountId
-    }
-    
-    gateway.wiredModem.transmit(
-        gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
-        textutils.serialize(request)
-    )
-    
-    -- Wait for response from balance manager
-    local timer = os.startTimer(10)
-    while true do
-        local event, side, channel, respChannel, message = os.pullEvent()
-        
-        if event == "modem_message" and channel == gateway.wiredChannel then
-            os.cancelTimer(timer)
-            local response = textutils.unserialize(message)
-            gateway.sendWireless(replyChannel, response)
-            return
-        elseif event == "timer" then
-            gateway.sendWireless(replyChannel, {
-                success = false,
-                error = "Internal server timeout"
-            })
-            return
-        end
-    end
-end
-
-
--- Handle wired message (from internal servers)
-function gateway.handleWiredMessage(message, replyChannel)
-    local data = textutils.unserialize(message)
-    
-    if not data then
-        return
-    end
-    
-    -- Route based on request type
-    if data.requestType == "REGISTER_MACHINE" then
-        gateway.handleMachineRegistration(data, replyChannel)
-    elseif data.requestType == "GET_PUBLIC_KEY" then
-        -- Return the gateway's public key for encryption
-        gateway.sendWired(replyChannel, {
-            success = true,
-            publicKey = gateway.publicKey
-        })
-    end
-end
-
--- Load deposit machine registry
+-- Load machine registry
 function gateway.load(filename)
     filename = filename or "gateway.dat"
     if not fs.exists(filename) then return false end
-    
     local file = fs.open(filename, "r")
     if not file then return false end
-    
     local data = textutils.unserialize(file.readAll())
     file.close()
-    
     if data then
         gateway.depositMachines = data.depositMachines or {}
-        print("Loaded " .. #gateway.depositMachines .. " deposit machines")
+        print("Loaded machines")
         return true
     end
-    
     return false
 end
 
--- Save deposit machine registry
+-- Save machine registry
 function gateway.save(filename)
     filename = filename or "gateway.dat"
     local file = fs.open(filename, "w")
     if not file then return false end
-    
-    file.write(textutils.serialize({
-        depositMachines = gateway.depositMachines
-    }))
+    file.write(textutils.serialize({ depositMachines = gateway.depositMachines }))
     file.close()
     return true
 end
 
--- Main loop
+-- Main loop with threading
 function gateway.run()
     print("Gateway running...")
     gateway.load()
     
     local lastSave = os.epoch("utc")
+    local routines = {} -- Coroutine -> filter
     
     while true do
-        local event, side, channel, replyChannel, message, distance = os.pullEvent("modem_message")
+        local eventData = {os.pullEventRaw()}
+        local event = eventData[1]
         
-        -- Check if from wireless (external)
-        if side == peripheral.getName(gateway.wirelessModem) and channel == gateway.wirelessChannel then
-            gateway.handleWirelessMessage(message, replyChannel)
-        -- Check if from wired (internal - server manager)
-        elseif side == peripheral.getName(gateway.wiredModem) and channel == gateway.wiredChannel then
-            gateway.handleWiredMessage(message, replyChannel)
+        if event == "terminate" then
+            print("Terminating gateway...")
+            break
         end
         
-        -- Auto-save every 5 minutes
+        -- 1. Spawn new threads for incoming messages
+        if event == "modem_message" then
+            local side, channel, replyChannel, message = eventData[2], eventData[3], eventData[4], eventData[5]
+            
+            local co = nil
+            
+            -- Wireless (External)
+            if side == peripheral.getName(gateway.wirelessModem) and channel == gateway.wirelessChannel then
+                co = coroutine.create(function()
+                    gateway.handleWirelessMessage(message, replyChannel)
+                end)
+            
+            -- Wired (Internal - Server Manager)
+            elseif side == peripheral.getName(gateway.wiredModem) and channel == gateway.wiredChannel then
+                co = coroutine.create(function()
+                    gateway.handleWiredMessage(message, replyChannel)
+                end)
+            end
+            
+            if co then
+                -- Start the thread
+                local ok, result = coroutine.resume(co)
+                if ok then
+                    if coroutine.status(co) ~= "dead" then
+                        routines[co] = result
+                    end
+                else
+                    print("Error starting thread: " .. tostring(result))
+                end
+            end
+        end
+        
+        -- 2. Resume existing threads
+        local dead = {}
+        for co, filter in pairs(routines) do
+            if filter == nil or filter == event then
+                local ok, result = coroutine.resume(co, table.unpack(eventData))
+                if not ok then
+                    print("Thread error: " .. tostring(result))
+                    dead[co] = true
+                elseif coroutine.status(co) == "dead" then
+                    dead[co] = true
+                else
+                    routines[co] = result
+                end
+            end
+        end
+        
+        for co in pairs(dead) do routines[co] = nil end
+        
+        -- Auto-save
         if os.epoch("utc") - lastSave > 300000 then
             gateway.save()
             lastSave = os.epoch("utc")
