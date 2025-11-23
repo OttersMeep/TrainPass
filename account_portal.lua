@@ -274,6 +274,14 @@ portal.loadPasswords()
 
 -- Create Basalt UI
 local main = basalt.createFrame()
+    :initializeState("currentScreen", "home")
+    :initializeState("createUsername", "")
+    :initializeState("createPassword", "")
+    :initializeState("createCardUUID", nil)
+    :initializeState("loginUsername", "")
+    :initializeState("loginPassword", "")
+    :initializeState("currentUser", nil)
+    :initializeState("currentAccount", nil)
 
 local termWidth, termHeight = term.getSize()
 
@@ -283,9 +291,6 @@ local colorPrimary = colors.blue
 local colorSuccess = colors.green
 local colorError = colors.red
 local colorText = colors.white
-
--- Current screen tracking
-local currentScreen = "home"  -- "home", "create", "login", "menu", "add_card", "remove_card"
 
 -- Home Screen
 local homeFrame = main:addFrame()
@@ -344,6 +349,7 @@ local createUsernameInput = createFrame:addInput()
     :setSize(20, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
+    :bind("text", "createUsername")
 
 createFrame:addLabel()
     :setText("Password:")
@@ -355,6 +361,7 @@ local createPasswordInput = createFrame:addInput({replaceChar="*"})
     :setSize(20, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
+    :bind("text", "createPassword")
 
 createFrame:addLabel()
     :setText("Swipe a card to register:")
@@ -409,6 +416,7 @@ local loginUsernameInput = loginFrame:addInput()
     :setSize(20, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
+    :bind("text", "loginUsername")
 
 loginFrame:addLabel()
     :setText("Password:")
@@ -420,6 +428,7 @@ local loginPasswordInput = loginFrame:addInput({replaceChar="*"})
     :setSize(20, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
+    :bind("text", "loginPassword")
 
 local loginConfirmBtn = loginFrame:addButton()
     :setText("Login")
@@ -555,37 +564,38 @@ local removeCardCancelBtn = removeCardFrame:addButton()
 
 -- Go to create account screen
 createAccountBtn:onClick(function()
-    createUsernameInput:setValue("")
-    createPasswordInput:setValue("")
+    main:setState("createUsername", "")
+    main:setState("createPassword", "")
+    main:setState("createCardUUID", nil)
     createCardLabel:setText("No card")
-    createCardUUID = nil
     createStatusLabel:setText("")
     homeFrame:setVisible(false)
     createFrame:setVisible(true)
-    currentScreen = "create"
+    main:setState("currentScreen", "create")
 end)
 
 -- Go to login screen
 loginBtn:onClick(function()
-    loginUsernameInput:setValue("")
-    loginPasswordInput:setValue("")
+    main:setState("loginUsername", "")
+    main:setState("loginPassword", "")
     loginStatusLabel:setText("")
     homeFrame:setVisible(false)
     loginFrame:setVisible(true)
-    currentScreen = "login"
+    main:setState("currentScreen", "login")
 end)
 
 -- Create account confirm
 createConfirmBtn:onClick(function()
-    local username = createUsernameInput:getValue()
-    local password = createPasswordInput:getValue()
+    local username = main:getState("createUsername")
+    local password = main:getState("createPassword")
+    local cardUUID = main:getState("createCardUUID")
     
     if username == "" or password == "" then
         createStatusLabel:setText("Username and password required"):setForeground(colorError)
         return
     end
     
-    if not createCardUUID then
+    if not cardUUID then
         createStatusLabel:setText("Please swipe a card"):setForeground(colorError)
         return
     end
@@ -593,13 +603,13 @@ createConfirmBtn:onClick(function()
     createStatusLabel:setText("Creating account..."):setForeground(colors.yellow)
     basalt.update()
     
-    local success, result = portal.createAccount(username, password, createCardUUID)
+    local success, result = portal.createAccount(username, password, cardUUID)
     if success then
         createStatusLabel:setText("Account created!"):setForeground(colorSuccess)
         sleep(2)
         createFrame:setVisible(false)
         homeFrame:setVisible(true)
-        currentScreen = "home"
+        main:setState("currentScreen", "home")
     else
         createStatusLabel:setText("Error: " .. tostring(result)):setForeground(colorError)
     end
@@ -609,13 +619,13 @@ end)
 createCancelBtn:onClick(function()
     createFrame:setVisible(false)
     homeFrame:setVisible(true)
-    currentScreen = "home"
+    main:setState("currentScreen", "home")
 end)
 
 -- Login confirm
 loginConfirmBtn:onClick(function()
-    local username = loginUsernameInput:getValue()
-    local password = loginPasswordInput:getValue()
+    local username = main:getState("loginUsername")
+    local password = main:getState("loginPassword")
     
     if username == "" or password == "" then
         loginStatusLabel:setText("Username and password required"):setForeground(colorError)
@@ -627,8 +637,8 @@ loginConfirmBtn:onClick(function()
     
     local success, account = portal.login(username, password)
     if success then
-        portal.currentUser = username
-        portal.currentAccount = account
+        main:setState("currentUser", username)
+        main:setState("currentAccount", account)
         
         -- Update menu
         menuUsernameLabel:setText("User: " .. username)
@@ -637,7 +647,7 @@ loginConfirmBtn:onClick(function()
         
         loginFrame:setVisible(false)
         menuFrame:setVisible(true)
-        currentScreen = "menu"
+        main:setState("currentScreen", "menu")
     else
         loginStatusLabel:setText("Error: " .. tostring(account)):setForeground(colorError)
     end
@@ -647,7 +657,7 @@ end)
 loginCancelBtn:onClick(function()
     loginFrame:setVisible(false)
     homeFrame:setVisible(true)
-    currentScreen = "login"
+    main:setState("currentScreen", "home")
 end)
 
 -- Go to add card screen
@@ -655,7 +665,7 @@ addCardBtn:onClick(function()
     addCardStatusLabel:setText("Waiting for card..."):setForeground(colors.yellow)
     menuFrame:setVisible(false)
     addCardFrame:setVisible(true)
-    currentScreen = "add_card"
+    main:setState("currentScreen", "add_card")
 end)
 
 -- Go to remove card screen
@@ -663,30 +673,30 @@ removeCardBtn:onClick(function()
     removeCardStatusLabel:setText("Waiting for card..."):setForeground(colors.yellow)
     menuFrame:setVisible(false)
     removeCardFrame:setVisible(true)
-    currentScreen = "remove_card"
+    main:setState("currentScreen", "remove_card")
 end)
 
 -- Add card cancel
 addCardCancelBtn:onClick(function()
     addCardFrame:setVisible(false)
     menuFrame:setVisible(true)
-    currentScreen = "menu"
+    main:setState("currentScreen", "menu")
 end)
 
 -- Remove card cancel
 removeCardCancelBtn:onClick(function()
     removeCardFrame:setVisible(false)
     menuFrame:setVisible(true)
-    currentScreen = "menu"
+    main:setState("currentScreen", "menu")
 end)
 
 -- Logout
 menuLogoutBtn:onClick(function()
-    portal.currentUser = nil
-    portal.currentAccount = nil
+    main:setState("currentUser", nil)
+    main:setState("currentAccount", nil)
     menuFrame:setVisible(false)
     homeFrame:setVisible(true)
-    currentScreen = "home"
+    main:setState("currentScreen", "home")
 end)
 
 -- Card reader thread
@@ -696,59 +706,63 @@ local function cardReaderThread()
             local event, info = os.pullEvent("card_read")
             
             if event == "card_read" and info and info.data then
-                if currentScreen == "create" then
+                local screen = main:getState("currentScreen")
+                
+                if screen == "create" then
                     -- Register card for new account
-                    createCardUUID = info.data
+                    main:setState("createCardUUID", info.data)
                     createCardLabel:setText("Card: " .. info.data:sub(1, 16) .. "..."):setForeground(colorSuccess)
                     cardReader.beep(1200)
                     
-                elseif currentScreen == "add_card" then
+                elseif screen == "add_card" then
                     -- Add card to current account
+                    local currentAccount = main:getState("currentAccount")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
                     basalt.update()
                     
-                    local success, err = portal.addCard(portal.currentAccount.accountId, info.data)
+                    local success, err = portal.addCard(currentAccount.accountId, info.data)
                     if success then
                         addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
                         cardReader.beep(1500)
                         sleep(2)
                         
                         -- Refresh account info
-                        local _, account = portal.getAccountInfo(portal.currentAccount.accountId)
+                        local _, account = portal.getAccountInfo(currentAccount.accountId)
                         if account then
-                            portal.currentAccount = account
+                            main:setState("currentAccount", account)
                             menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
                         end
                         
                         addCardFrame:setVisible(false)
                         menuFrame:setVisible(true)
-                        currentScreen = "menu"
+                        main:setState("currentScreen", "menu")
                     else
                         addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
                         cardReader.beep(500)
                     end
                     
-                elseif currentScreen == "remove_card" then
+                elseif screen == "remove_card" then
                     -- Remove card from current account
+                    local currentAccount = main:getState("currentAccount")
                     removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
                     basalt.update()
                     
-                    local success, err = portal.removeCard(portal.currentAccount.accountId, info.data)
+                    local success, err = portal.removeCard(currentAccount.accountId, info.data)
                     if success then
                         removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
                         cardReader.beep(1500)
                         sleep(2)
                         
                         -- Refresh account info
-                        local _, account = portal.getAccountInfo(portal.currentAccount.accountId)
+                        local _, account = portal.getAccountInfo(currentAccount.accountId)
                         if account then
-                            portal.currentAccount = account
+                            main:setState("currentAccount", account)
                             menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
                         end
                         
                         removeCardFrame:setVisible(false)
                         menuFrame:setVisible(true)
-                        currentScreen = "menu"
+                        main:setState("currentScreen", "menu")
                     else
                         removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
                         cardReader.beep(500)
