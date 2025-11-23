@@ -200,6 +200,12 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
     else
         return false, "ecc.lua not found on server manager"
     end
+
+        if fs.exists("basalt.lua") then
+        fs.copy("basalt.lua", fs.combine(mountPath, "basalt.lua"))
+    else
+        return false, "basalt.lua not found on server manager"
+    end
     
     -- Check if there's a template machine_config.lua to use
     local useTemplate = fs.exists("machine_config_template.lua")
