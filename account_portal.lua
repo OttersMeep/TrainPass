@@ -140,9 +140,28 @@ function portal.waitForResponse(timeout)
                 -- Decrypt using shared secret
                 local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, portal.sharedSecret)
                 if success then
-                    portal.log(decrypted)
-                    local response = textutils.serialize(decrypted)
-                    return response
+                    local responseStr = decrypted
+                    
+                    -- FIX: If decrypt returns a byte array (table), convert it to a string first
+                    if type(decrypted) == "table" then
+                        local chars = {}
+                        for i = 1, #decrypted do
+                            chars[i] = string.char(decrypted[i])
+                        end
+                        responseStr = table.concat(chars)
+                    end
+                    
+                    portal.log("Decrypted: " .. tostring(responseStr))
+                    
+                    -- Now unserialize the string into a Lua table
+                    local response = textutils.unserialize(responseStr)
+                    
+                    if type(response) == "table" then
+                        return response
+                    else
+                        portal.log("Error: Unserialized data is not a table")
+                        return nil, "Invalid response format"
+                    end
                 else
                     return nil, "Decryption failed"
                 end
