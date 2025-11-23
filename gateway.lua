@@ -3,11 +3,17 @@
 -- Encrypts outgoing messages, decrypts incoming messages
 -- Verifies signatures from deposit machines
 
+local ecc = require("ecc")
+
 local gateway = {}
 
 -- Modems
 gateway.wiredModem = nil
 gateway.wirelessModem = nil
+
+-- Gateway's own keypair for encryption
+gateway.privateKey = nil
+gateway.publicKey = nil
 
 -- Channels
 gateway.wirelessChannel = 1000 -- External channel for wireless clients
@@ -19,6 +25,34 @@ gateway.depositMachines = {}
 
 -- Initialize
 function gateway.init()
+    -- Load or generate gateway keypair
+    if fs.exists("gateway_keys.dat") then
+        local file = fs.open("gateway_keys.dat", "r")
+        if file then
+            local data = textutils.unserialize(file.readAll())
+            file.close()
+            gateway.privateKey = data.privateKey
+            gateway.publicKey = data.publicKey
+            print("Loaded gateway keypair")
+        end
+    end
+    
+    if not gateway.privateKey then
+        print("Generating new gateway keypair...")
+        gateway.privateKey, gateway.publicKey = ecc.keypair()
+        
+        -- Save keypair
+        local file = fs.open("gateway_keys.dat", "w")
+        if file then
+            file.write(textutils.serialize({
+                privateKey = gateway.privateKey,
+                publicKey = gateway.publicKey
+            }))
+            file.close()
+            print("Gateway keypair saved")
+        end
+    end
+    
     -- Find wired modem
     gateway.wiredModem = peripheral.find("modem", function(name, modem)
         return modem.isWireless() == false
@@ -64,37 +98,49 @@ function gateway.verifyDepositSignature(machineId, message, signature)
     return isValid, isValid and nil or "Invalid signature"
 end
 
--- Encrypt message for wireless transmission
-function gateway.encryptMessage(message, recipientPublicKey)
-    -- In a full implementation, use ECC encryption here
-    -- For now, we'll use signing to ensure authenticity
-    local ecc = require("ecc")
-    
+-- Encrypt message for wireless transmission (outgoing to clients)
+function gateway.encryptMessage(message)
     local packet = {
         data = message,
-        timestamp = os.epoch("utc"),
-        signature = nil -- Would sign with server's private key
+        timestamp = os.epoch("utc")
     }
+    
+    -- Sign with gateway's private key for authenticity
+    local signature = ecc.sign(gateway.privateKey, textutils.serialize(packet))
+    packet.signature = signature
     
     return textutils.serialize(packet)
 end
 
--- Decrypt incoming wireless message
+-- Decrypt incoming wireless message (from clients)
 function gateway.decryptMessage(encryptedMessage)
-    -- In a full implementation, decrypt with ECC here
     local packet = textutils.unserialize(encryptedMessage)
     
-    if not packet or not packet.data then
+    if not packet or not packet.encryptedData then
         return nil, "Invalid packet format"
     end
     
     -- Verify timestamp (prevent replay attacks)
-    local age = os.epoch("utc") - packet.timestamp
-    if age > 60000 then -- 60 seconds
-        return nil, "Packet too old"
+    if packet.timestamp then
+        local age = os.epoch("utc") - packet.timestamp
+        if age > 60000 then -- 60 seconds
+            return nil, "Packet too old"
+        end
     end
     
-    return packet.data, nil
+    -- Decrypt with gateway's private key
+    local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, gateway.privateKey)
+    if not success then
+        return nil, "Decryption failed"
+    end
+    
+    -- Parse decrypted data
+    local data = textutils.unserialize(tostring(decrypted))
+    if not data then
+        return nil, "Invalid decrypted data format"
+    end
+    
+    return data, nil
 end
 
 -- Handle deposit request from wireless
@@ -300,11 +346,66 @@ function gateway.handleWirelessMessage(message, replyChannel)
         gateway.handleDepositRequest(data, replyChannel)
     elseif data.requestType == "CARD_PAYMENT" then
         gateway.handleCardPayment(data, replyChannel)
+    elseif data.requestType == "GET_ACCOUNT_BY_CARD" then
+        gateway.handleGetAccountByCard(data, replyChannel)
     else
         gateway.sendWireless(replyChannel, {
             success = false,
             error = "Unknown request type"
         })
+    end
+end
+
+-- Handle GET_ACCOUNT_BY_CARD request
+function gateway.handleGetAccountByCard(data, replyChannel)
+    if not data.cardUUID then
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Missing cardUUID"
+        })
+        return
+    end
+    
+    -- Forward to balance manager
+    local request = {
+        action = "GET_ACCOUNT_BY_CARD",
+        cardUUID = data.cardUUID
+    }
+    
+    gateway.wiredModem.transmit(
+        gateway.balanceManagerChannel,
+        gateway.wirelessChannel,
+        textutils.serialize(request)
+    )
+    
+    -- Wait for response from balance manager
+    local timer = os.startTimer(10)
+    while true do
+        local event, side, channel, respChannel, message = os.pullEvent()
+        
+        if event == "modem_message" and channel == gateway.wirelessChannel then
+            os.cancelTimer(timer)
+            local response = textutils.unserialize(message)
+            
+            if response and response.success and response.account then
+                gateway.sendWireless(replyChannel, {
+                    success = true,
+                    accountId = response.account.accountId
+                })
+            else
+                gateway.sendWireless(replyChannel, {
+                    success = false,
+                    error = response and response.error or "Card not registered"
+                })
+            end
+            return
+        elseif event == "timer" and side == timer then
+            gateway.sendWireless(replyChannel, {
+                success = false,
+                error = "Internal server timeout"
+            })
+            return
+        end
     end
 end
 
@@ -319,6 +420,12 @@ function gateway.handleWiredMessage(message, replyChannel)
     -- Route based on request type
     if data.requestType == "REGISTER_MACHINE" then
         gateway.handleMachineRegistration(data, replyChannel)
+    elseif data.requestType == "GET_PUBLIC_KEY" then
+        -- Return the gateway's public key for encryption
+        gateway.sendWired(replyChannel, {
+            success = true,
+            publicKey = gateway.publicKey
+        })
     end
 end
 

@@ -110,6 +110,36 @@ function serverManager.generateMachineId(machineType)
     return uuid
 end
 
+-- Request gateway's public key for encryption
+function serverManager.getGatewayPublicKey()
+    print("Requesting gateway public key...")
+    
+    modem.transmit(serverManager.config.gatewayChannel, serverManager.config.responseChannel, textutils.serialize({
+        requestType = "GET_PUBLIC_KEY",
+        timestamp = os.epoch("utc")
+    }))
+    
+    -- Wait for response
+    local timer = os.startTimer(10)
+    while true do
+        local event, side, channel, replyChannel, message, distance = os.pullEvent()
+        
+        if event == "modem_message" and channel == serverManager.config.responseChannel then
+            local response = textutils.unserialize(message)
+            if response and response.success and response.publicKey then
+                os.cancelTimer(timer)
+                print("  Received gateway public key")
+                return response.publicKey
+            elseif response and not response.success then
+                os.cancelTimer(timer)
+                return nil, response.error or "Unknown error"
+            end
+        elseif event == "timer" and side == timer then
+            return nil, "Timeout waiting for gateway public key"
+        end
+    end
+end
+
 -- Register machine with gateway
 function serverManager.registerWithGateway(machineId, publicKey)
     print("Registering " .. machineId .. " with gateway...")
@@ -191,12 +221,14 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         
         -- Serialize the private key (it's a byte table)
         local serializedPrivateKey = textutils.serialize(privateKey)
+        local serializedGatewayPublicKey = textutils.serialize(config.gatewayPublicKey or {})
         
         -- Replace placeholders with actual values
         templateContent = templateContent:gsub("%%MACHINE_ID%%", machineId)
         templateContent = templateContent:gsub("%%PRIVATE_KEY%%", serializedPrivateKey)
         templateContent = templateContent:gsub("%%MACHINE_TYPE%%", machineType)
         templateContent = templateContent:gsub("%%GATEWAY_CHANNEL%%", tostring(config.gatewayChannel or 1000))
+        templateContent = templateContent:gsub("%%GATEWAY_PUBLIC_KEY%%", serializedGatewayPublicKey)
         
         configFile.write(templateContent)
         configFile.close()
@@ -354,22 +386,29 @@ function serverManager.provisionMachine(machineType, additionalConfig)
         return false, "Failed to generate keypair: " .. (err or "unknown error")
     end
     
-    -- Step 3: Register with gateway
+    -- Step 3: Get gateway's public key for encryption
+    local gatewayPublicKey, err = serverManager.getGatewayPublicKey()
+    if not gatewayPublicKey then
+        return false, "Failed to get gateway public key: " .. (err or "unknown error")
+    end
+    
+    -- Step 4: Register with gateway
     local success, err = serverManager.registerWithGateway(machineId, publicKey)
     if not success then
         return false, "Failed to register with gateway: " .. (err or "unknown error")
     end
     
-    -- Step 4: Write to disk
+    -- Step 5: Write to disk
     local config = additionalConfig or {}
     config.gatewayChannel = 1000
+    config.gatewayPublicKey = gatewayPublicKey  -- Include gateway's public key
     
     success, err = serverManager.writeToDisk(machineId, privateKey, machineType, config)
     if not success then
         return false, "Failed to write to disk: " .. (err or "unknown error")
     end
     
-    -- Step 5: Store in local registry
+    -- Step 6: Store in local registry
     table.insert(serverManager.registeredMachines, {
         machineId = machineId,
         machineType = machineType,

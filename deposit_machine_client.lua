@@ -76,6 +76,14 @@ if monitor then
     print("Monitor size: " .. monitor.getSize())
 end
 
+-- Find card reader
+local cardReader = peripheral.find("card_reader")
+if not cardReader then
+    print("WARNING: No card reader found. Manual account entry only.")
+else
+    print("Card reader detected: " .. peripheral.getName(cardReader))
+end
+
 -- Find wireless modem
 local modem = peripheral.find("modem", function(name, modem)
     return modem.isWireless()
@@ -109,10 +117,19 @@ end
 -- Send request to gateway
 function atm.sendRequest(requestData)
     atm.waitingForResponse = true
+    
+    -- Encrypt the request data with the gateway's public key
+    local serializedData = textutils.serialize(requestData.data)
+    local encryptedData = ecc.encrypt(serializedData, atm.config.gatewayPublicKey)
+    
+    -- Send encrypted packet
     modem.transmit(
         atm.config.gatewayChannel,
         atm.config.responseChannel,
-        textutils.serialize(requestData)
+        textutils.serialize({
+            encryptedData = encryptedData,
+            timestamp = requestData.timestamp
+        })
     )
 end
 
@@ -133,6 +150,29 @@ function atm.waitForResponse(timeout)
             atm.waitingForResponse = false
             return nil, "Timeout"
         end
+    end
+end
+
+-- Look up account by card UUID
+function atm.getAccountByCard(cardUUID)
+    local timestamp = os.epoch("utc")
+    local signature = atm.signDeposit(cardUUID, 0, timestamp)
+    
+    atm.sendRequest({
+        data = {
+            requestType = "GET_ACCOUNT_BY_CARD",
+            cardUUID = cardUUID,
+            timestamp = timestamp,
+            signature = signature
+        },
+        timestamp = timestamp
+    })
+    
+    local response, err = atm.waitForResponse(10)
+    if response and response.success and response.accountId then
+        return true, response.accountId
+    else
+        return false, response and response.error or err or "Card not registered"
     end
 end
 
@@ -279,27 +319,15 @@ homeFrame:addLabel()
     :setForeground(colors.lightGray)
 
 homeFrame:addLabel()
-    :setText("Enter Account ID:")
+    :setText("Please swipe your card")
     :setPosition(2, 5)
     :setForeground(colorText)
-
-local accountInput = homeFrame:addInput()
-    :setPosition(2, 6)
-    :setSize(20, 1)
-    :setBackground(colors.black)
-    :setForeground(colors.white)
+    :setFontSize(2)
 
 local statusLabel = homeFrame:addLabel()
-    :setText("")
-    :setPosition(2, 8)
-    :setForeground(colorText)
-
-local loginBtn = homeFrame:addButton()
-    :setText("Login")
-    :setPosition(2, 10)
-    :setSize(10, 3)
-    :setBackground(colorPrimary)
-    :setForeground(colors.white)
+    :setText(cardReader and "Ready" or "ERROR: No card reader!")
+    :setPosition(2, 7)
+    :setForeground(cardReader and colorSuccess or colorError)
 
 -- Menu Screen
 local menuFrame = main:addFrame()
@@ -436,31 +464,6 @@ local withdrawCancelBtn = withdrawFrame:addButton()
 
 -- Event Handlers
 
--- Login
-loginBtn:onClick(function()
-    local accountId = accountInput:getValue()
-    if accountId == "" then
-        statusLabel:setText("Please enter account ID"):setForeground(colorError)
-        return
-    end
-    
-    statusLabel:setText("Checking account..."):setForeground(colors.yellow)
-    basalt.update()
-    
-    local success, balance = atm.checkBalance(accountId)
-    if success then
-        atm.currentAccount = accountId
-        atm.currentBalance = balance
-        menuAccountLabel:setText("Account: " .. accountId)
-        menuBalanceLabel:setText("Balance: " .. balance)
-        homeFrame:setVisible(false)
-        menuFrame:setVisible(true)
-        currentScreen = "menu"
-    else
-        statusLabel:setText("Error: " .. balance):setForeground(colorError)
-    end
-end)
-
 -- Check Balance
 checkBalanceBtn:onClick(function()
     menuBalanceLabel:setText("Checking..."):setForeground(colors.yellow)
@@ -582,8 +585,7 @@ end)
 logoutBtn:onClick(function()
     atm.currentAccount = nil
     atm.currentBalance = 0
-    accountInput:setValue("")
-    statusLabel:setText("")
+    statusLabel:setText("Ready"):setForeground(colorSuccess)
     menuFrame:setVisible(false)
     homeFrame:setVisible(true)
     currentScreen = "home"
@@ -689,10 +691,95 @@ local function diamondDetectionThread()
     end
 end
 
+-- Card reader thread
+local function cardReaderThread()
+    if not cardReader then return end
+    
+    while true do
+        local event, info = os.pullEvent("card_read")
+        
+        if event == "card_read" and info and info.data then
+            -- Only process cards on home or menu screen
+            if currentScreen == "home" then
+                -- Beep and light to indicate card read
+                cardReader.beep(1000)
+                cardReader.setLight("YELLOW", true)
+                sleep(0.1)
+                cardReader.setLight("YELLOW", false)
+                
+                statusLabel:setText("Reading card..."):setForeground(colors.yellow)
+                basalt.update()
+                
+                -- Look up account from card UUID
+                local success, accountId = atm.getAccountByCard(info.data)
+                if not success then
+                    statusLabel:setText("Error: " .. accountId):setForeground(colorError)
+                    
+                    -- Error beep and light
+                    cardReader.setLight("RED", true)
+                    cardReader.beep(500)
+                    sleep(0.1)
+                    cardReader.beep(400)
+                    sleep(0.3)
+                    cardReader.setLight("RED", false)
+                else
+                    statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
+                    basalt.update()
+                    
+                    -- Get balance for this account
+                    local balSuccess, balance = atm.checkBalance(accountId)
+                    if balSuccess then
+                        atm.currentAccount = accountId
+                        atm.currentBalance = balance
+                        menuAccountLabel:setText("Account: " .. accountId)
+                        menuBalanceLabel:setText("Balance: " .. balance)
+                        
+                        -- Write balance to card
+                        cardReader.write(info.data, "Balance: " .. balance)
+                        
+                        -- Success beep and light
+                        cardReader.setLight("GREEN", true)
+                        cardReader.beep(1500)
+                        sleep(0.1)
+                        cardReader.beep(1800)
+                        sleep(0.2)
+                        cardReader.setLight("GREEN", false)
+                        
+                        homeFrame:setVisible(false)
+                        menuFrame:setVisible(true)
+                        currentScreen = "menu"
+                    else
+                        statusLabel:setText("Error: " .. balance):setForeground(colorError)
+                        
+                        -- Error beep and light
+                        cardReader.setLight("RED", true)
+                        cardReader.beep(500)
+                        sleep(0.1)
+                        cardReader.beep(400)
+                        sleep(0.3)
+                        cardReader.setLight("RED", false)
+                    end
+                end
+            elseif currentScreen == "menu" then
+                -- Update card with current balance (verify card matches current account)
+                local success, accountId = atm.getAccountByCard(info.data)
+                if success and accountId == atm.currentAccount then
+                    cardReader.write(info.data, "Balance: " .. atm.currentBalance)
+                    cardReader.beep(1200)
+                    cardReader.setLight("GREEN", true)
+                    sleep(0.1)
+                    cardReader.setLight("GREEN", false)
+                end
+            end
+        end
+    end
+end
+
 -- Start threads
 parallel.waitForAny(
     function()
         basalt.run()
     end,
-    diamondDetectionThread
+    diamondDetectionThread,
+    cardReaderThread
 )
