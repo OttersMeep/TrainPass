@@ -355,7 +355,6 @@ end
 -- Handle incoming requests
 function balanceManager.handleRequest(message)
     local request = textutils.unserialize(message)
-    print(message)
     if not request then return nil end
     
     if request.action == "CREATE_ACCOUNT" then
