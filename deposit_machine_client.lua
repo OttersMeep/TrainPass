@@ -126,15 +126,6 @@ atm.currentBalance = 0
 atm.diamondsInserted = 0
 atm.waitingForResponse = false
 
--- Sign deposit request
-function atm.signDeposit(accountId, amount, timestamp)
-    local message = accountId .. amount .. timestamp
-    print(message)
-    print(atm.config.privateKey)
-    local signature = ecc.sign(atm.config.privateKey, message)
-    return signature
-end
-
 -- Send request to gateway
 function atm.sendRequest(requestData)
     atm.waitingForResponse = true
@@ -177,14 +168,13 @@ end
 -- Look up account by card UUID
 function atm.getAccountByCard(cardUUID)
     local timestamp = os.epoch("utc")
-    local signature = atm.signDeposit(cardUUID, 0, timestamp)
     
     atm.sendRequest({
         data = {
             requestType = "GET_ACCOUNT_BY_CARD",
             cardUUID = cardUUID,
-            timestamp = timestamp,
-            signature = signature
+            depositMachineId = atm.config.machineId,
+            timestamp = timestamp
         },
         timestamp = timestamp
     })
@@ -200,7 +190,6 @@ end
 -- Check balance
 function atm.checkBalance(accountId)
     local timestamp = os.epoch("utc")
-    local signature = atm.signDeposit(accountId, 0, timestamp)
     
     atm.sendRequest({
         data = {
@@ -208,8 +197,7 @@ function atm.checkBalance(accountId)
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = 0,  -- 0 amount = balance check
-            timestamp = timestamp,
-            signature = signature
+            timestamp = timestamp
         },
         timestamp = timestamp
     })
@@ -226,7 +214,6 @@ end
 function atm.processDeposit(accountId, diamonds)
     local amount = diamonds * atm.config.diamondValue
     local timestamp = os.epoch("utc")
-    local signature = atm.signDeposit(accountId, amount, timestamp)
     
     atm.sendRequest({
         data = {
@@ -234,8 +221,7 @@ function atm.processDeposit(accountId, diamonds)
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = amount,
-            timestamp = timestamp,
-            signature = signature
+            timestamp = timestamp
         },
         timestamp = timestamp
     })
@@ -259,7 +245,6 @@ end
 function atm.processWithdrawal(accountId, diamonds)
     local amount = diamonds * atm.config.diamondValue
     local timestamp = os.epoch("utc")
-    local signature = atm.signDeposit(accountId, -amount, timestamp)  -- Negative for withdrawal
     
     atm.sendRequest({
         data = {
@@ -267,8 +252,7 @@ function atm.processWithdrawal(accountId, diamonds)
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = -amount,  -- Negative amount = withdrawal
-            timestamp = timestamp,
-            signature = signature
+            timestamp = timestamp
         },
         timestamp = timestamp
     })
