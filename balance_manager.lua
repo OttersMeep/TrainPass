@@ -180,14 +180,17 @@ function balanceManager.deposit(accountId, amount, depositMachineId, signature)
     
     local account = balanceManager.getAccount(accountId)
     if not account then
+        print("Account not found")
         return nil, "Account not found"
     end
     
     if not account.active then
+        print("Inactive Account")
         return nil, "Account is inactive"
     end
     
     if account.balance + amount > balanceManager.config.maxBalance then
+        print("Deposit exceeds maximum")
         return nil, "Deposit would exceed maximum balance"
     end
     
