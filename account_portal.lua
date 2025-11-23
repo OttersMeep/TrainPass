@@ -695,7 +695,7 @@ local function cardReaderThread()
                     local currentAccount = main:getState("currentAccount")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
                     
-                    main:schedule(function()
+                    basalt.schedule(function()
                         local success, err = portal.addCard(currentAccount.accountId, info.data)
                         if success then
                             addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
@@ -723,7 +723,7 @@ local function cardReaderThread()
                     local currentAccount = main:getState("currentAccount")
                     removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
                     
-                    main:schedule(function()
+                    basalt.schedule(function()
                         local success, err = portal.removeCard(currentAccount.accountId, info.data)
                         if success then
                             removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
