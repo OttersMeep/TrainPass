@@ -177,9 +177,6 @@ end
 
 -- Deposit funds
 function balanceManager.deposit(accountId, amount, depositMachineId, signature)
-    if amount <= 0 then
-        return nil, "Amount must be positive"
-    end
     
     local account = balanceManager.getAccount(accountId)
     if not account then
