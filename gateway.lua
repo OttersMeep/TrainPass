@@ -23,6 +23,8 @@ gateway.ledgerChannel = 100
 -- Deposit machine registry (machineId -> publicKey)
 gateway.depositMachines = {}
 
+
+
 -- Initialize
 function gateway.init()
     -- Load or generate gateway keypair
@@ -304,6 +306,10 @@ function gateway.sendWireless(channel, data)
     gateway.wirelessModem.transmit(channel, gateway.wirelessChannel, encrypted)
 end
 
+function gateway.sendWired(channel, data)
+    gateway.wiredModem.transmit(channel, gateway.balanceManagerChannel, textutils.serialize(data))
+end
+
 -- Handle machine registration (from wired network - server manager)
 function gateway.handleMachineRegistration(data, replyChannel)
     if not data.machineId or not data.publicKey then
@@ -422,7 +428,7 @@ function gateway.handleWiredMessage(message, replyChannel)
         gateway.handleMachineRegistration(data, replyChannel)
     elseif data.requestType == "GET_PUBLIC_KEY" then
         -- Return the gateway's public key for encryption
-        gateway.wiredModem.transmit(replyChannel,gateway.wirelessChannel, {
+        gateway.sendWired(replyChannel, {
             success = true,
             publicKey = gateway.publicKey
         })

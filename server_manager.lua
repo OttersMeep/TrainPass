@@ -125,7 +125,7 @@ function serverManager.getGatewayPublicKey()
         local event, side, channel, replyChannel, message, distance = os.pullEvent()
         
         if event == "modem_message" and channel == serverManager.config.responseChannel then
-            local response = message
+            local response = textutils.unserialize(message)
             if response and response.success and response.publicKey then
                 os.cancelTimer(timer)
                 print("  Received gateway public key")
