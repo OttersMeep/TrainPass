@@ -371,7 +371,7 @@ local statusLabel = homeFrame:addLabel()
 
 -- Menu Screen
 local menuFrame = main:addFrame()
-    :setPosition(0, 0)
+    :setPosition(1, 1)
     :setSize(termWidth, termHeight)
     :setBackground(colorBg)
     :setVisible(false)
