@@ -243,6 +243,14 @@ function portal.addCard(accountId, cardUUID)
     end
 end
 
+local function generateUUID()
+    local template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
+    return string.gsub(template, '[xy]', function(c)
+        local v = (c == 'x') and math.random(0, 0xf) or math.random(8, 0xb)
+        return string.format('%x', v)
+    end)
+end
+
 -- Remove card from account
 function portal.removeCard(accountId, cardUUID)
     local timestamp = os.epoch("utc")
@@ -708,10 +716,24 @@ local function cardReaderThread()
                 if screen == "add_card" then
                     -- Add card to current account
                     local currentAccount = main:getState("currentAccount")
+                    local currentUser = main:getState("currentUser")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
                     
                     basalt.schedule(function()
-                        local success, err = portal.addCard(currentAccount.accountId, info.data)
+                        -- Generate new UUID for the card
+                        local newUUID = generateUUID()
+                        
+                        -- Write UUID and username to card
+                        local writeSuccess = cardReader.write(newUUID, currentUser)
+                        
+                        if not writeSuccess then
+                            addCardStatusLabel:setText("Error: Failed to write to card"):setForeground(colorError)
+                            cardReader.beep(500)
+                            return
+                        end
+                        
+                        -- Add card to account with new UUID
+                        local success, err = portal.addCard(currentAccount.accountId, newUUID)
                         if success then
                             addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
                             cardReader.beep(1500)
