@@ -217,7 +217,7 @@ function gateway.sendToBalanceManager(request)
         local event, side, channel, replyChannel, message = os.pullEvent()
         
         if event == "modem_message" then
-            -- print("DEBUG [Gateway]: Thread saw message on " .. tostring(channel))
+            print("DEBUG [Gateway]: Thread saw message on " .. tostring(channel))
             if channel == tempChannel then
                 print("DEBUG [Gateway]: Received response on temp channel " .. tempChannel)
                 response = textutils.unserialize(message)
@@ -226,6 +226,8 @@ function gateway.sendToBalanceManager(request)
         elseif event == "timer" and side == timer then
             print("DEBUG [Gateway]: Timeout waiting for response on " .. tempChannel)
             break -- Timeout, response remains nil
+        elseif
+            print(event)
         end
     end
     
