@@ -225,25 +225,18 @@ end
 function atm.checkBalance(accountId)
     local timestamp = os.epoch("utc")
     
-    -- Create signature for the request
-    local signedMessage = accountId .. "0" .. timestamp
-    local signature = ecc.sign(atm.config.privateKey, signedMessage)
-    
     atm.sendRequest({
         data = {
-            requestType = "DEPOSIT",
-            depositMachineId = atm.config.machineId,
+            requestType = "GET_ACCOUNT",
             accountId = accountId,
-            amount = 0,  -- 0 amount = balance check
-            timestamp = timestamp,
-            signature = signature
+            timestamp = timestamp
         },
         timestamp = timestamp
     })
     
     local response, err = atm.waitForResponse(10)
-    if response and response.success then
-        return true, response.balance
+    if response and response.success and response.account then
+        return true, response.account.balance
     else
         return false, response and response.error or err
     end
