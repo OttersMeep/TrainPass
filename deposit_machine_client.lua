@@ -496,7 +496,11 @@ local withdrawCancelBtn = withdrawFrame:addButton()
 
 -- Check Balance
 checkBalanceBtn:onClick(function()
+    term.redirect(term.native())  -- Temporarily redirect to computer terminal
+    print("Button clicked!")  -- This will print to the computer screen
     print("MEOW")
+    term.redirect(monitor)  -- Redirect back to monitor
+    
     menuBalanceLabel:setText("Checking..."):setForeground(colors.yellow)
     basalt.update()
     
