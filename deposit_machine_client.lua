@@ -203,6 +203,7 @@ function atm.getAccountByCard(cardUUID)
     print("Request sent, waiting for response...")
     local response, err = atm.waitForResponse(10)
     print("Response received: " .. textutils.serialize(response or {error = err}))
+    monitor.bottom.write(textutils.serialize(response or {error = err}) or "ERROR")
     
     if response and response.success and response.accountId then
         return true, response.accountId
