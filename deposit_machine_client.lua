@@ -121,6 +121,8 @@ atm.waitingForResponse = false
 -- Sign deposit request
 function atm.signDeposit(accountId, amount, timestamp)
     local message = accountId .. amount .. timestamp
+    print(message)
+    print(atm.config.privateKey)
     local signature = ecc.sign(atm.config.privateKey, message)
     return signature
 end
