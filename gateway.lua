@@ -460,6 +460,7 @@ end
 function gateway.handleCreateAccount(data, replyChannel)
     print("DEBUG [Gateway]: handleCreateAccount called")
     print("  username: " .. tostring(data.username))
+    print("  password: " .. (data.password and "***" or "nil"))
     print("  replyChannel: " .. tostring(replyChannel))
     
     if not data.username then
@@ -471,10 +472,24 @@ function gateway.handleCreateAccount(data, replyChannel)
         return
     end
     
+    if not data.password then
+        print("DEBUG [Gateway]: Missing password, sending error")
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Missing password"
+        })
+        return
+    end
+    
+    -- Hash the password server-side
+    local ecc = require("ecc")
+    local passwordHash = ecc.sha256.digest(data.password):toHex()
+    
     -- Forward to balance manager
     local request = {
         action = "CREATE_ACCOUNT",
         username = data.username,
+        passwordHash = passwordHash,
         publicKey = nil,  -- Portal accounts don't need public keys
         initialBalance = 0,
         cardUUIDs = {}  -- Empty initially, cards added later
@@ -505,6 +520,57 @@ function gateway.handleCreateAccount(data, replyChannel)
             return
         elseif event == "timer" then
             print("DEBUG [Gateway]: Timeout waiting for balance manager")
+            gateway.sendWireless(replyChannel, {
+                success = false,
+                error = "Internal server timeout"
+            })
+            return
+        end
+    end
+end
+
+-- Handle LOGIN request
+function gateway.handleLogin(data, replyChannel)
+    print("DEBUG [Gateway]: handleLogin called")
+    print("  username: " .. tostring(data.username))
+    print("  password: " .. (data.password and "***" or "nil"))
+    
+    if not data.username or not data.password then
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = "Missing username or password"
+        })
+        return
+    end
+    
+    -- Hash the password server-side
+    local ecc = require("ecc")
+    local passwordHash = ecc.sha256.digest(data.password):toHex()
+    
+    -- Forward to balance manager
+    local request = {
+        action = "LOGIN",
+        username = data.username,
+        passwordHash = passwordHash
+    }
+    
+    gateway.wiredModem.transmit(
+        gateway.balanceManagerChannel,
+        gateway.wiredChannel,
+        textutils.serialize(request)
+    )
+    
+    -- Wait for response
+    local timer = os.startTimer(10)
+    while true do
+        local event, side, channel, respChannel, message = os.pullEvent()
+        
+        if event == "modem_message" and channel == gateway.wiredChannel then
+            os.cancelTimer(timer)
+            local response = textutils.unserialize(message)
+            gateway.sendWireless(replyChannel, response)
+            return
+        elseif event == "timer" then
             gateway.sendWireless(replyChannel, {
                 success = false,
                 error = "Internal server timeout"

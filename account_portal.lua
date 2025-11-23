@@ -133,6 +133,7 @@ function portal.createAccount(username, password)
         data = {
             requestType = "CREATE_ACCOUNT",
             username = username,
+            password = password,  -- Send plain password (encrypted in transit)
             portalId = portal.config.machineId,
             timestamp = timestamp
         },
@@ -141,9 +142,6 @@ function portal.createAccount(username, password)
     
     local response, err = portal.waitForResponse(10)
     if response and response.success and response.accountId then
-        -- Store password hash locally
-        portal.passwords[response.accountId] = portal.hashPassword(password)
-        portal.savePasswords()
         return true, response.accountId
     else
         return false, response and response.error or err or "Account creation failed"
@@ -156,8 +154,9 @@ function portal.login(username, password)
     
     portal.sendRequest({
         data = {
-            requestType = "GET_ACCOUNT_BY_USERNAME",
+            requestType = "LOGIN",
             username = username,
+            password = password,  -- Send plain password (encrypted in transit)
             timestamp = timestamp
         },
         timestamp = timestamp
@@ -165,17 +164,9 @@ function portal.login(username, password)
     
     local response, err = portal.waitForResponse(10)
     if response and response.success and response.account then
-        local accountId = response.account.accountId
-        local storedHash = portal.passwords[accountId]
-        local inputHash = portal.hashPassword(password)
-        
-        if storedHash == inputHash then
-            return true, response.account
-        else
-            return false, "Invalid password"
-        end
+        return true, response.account
     else
-        return false, response and response.error or err or "Account not found"
+        return false, response and response.error or err or "Login failed"
     end
 end
 
