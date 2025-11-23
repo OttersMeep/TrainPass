@@ -401,6 +401,7 @@ function serverManager.provisionMachine(machineType, additionalConfig)
     -- Step 4: Register with gateway
     local success, err = serverManager.registerWithGateway(machineId, publicKey)
     if not success then
+        print(success)
         return false, "Failed to register with gateway: " .. (err or "unknown error")
     end
     
