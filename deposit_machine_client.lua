@@ -351,71 +351,61 @@ local homeFrame = main:addFrame()
 
 homeFrame:addLabel()
     :setText("TrainPass ATM")
-    :setPosition(2, 2)
+    :setPosition(1, 2)
     :setForeground(colorPrimary)
 
 homeFrame:addLabel()
     :setText("Machine: " .. atm.config.machineId)
-    :setPosition(2, 3)
+    :setPosition(1, 3)
     :setForeground(colors.lightGray)
 
 homeFrame:addLabel()
     :setText("Please swipe your card")
-    :setPosition(2, 5)
+    :setPosition(1, 5)
     :setForeground(colorText)
 
 local statusLabel = homeFrame:addLabel()
     :setText(cardReader and "Ready" or "ERROR: No card reader!")
-    :setPosition(2, 7)
+    :setPosition(1, 7)
     :setForeground(cardReader and colorSuccess or colorError)
 
 -- Menu Screen
 local menuFrame = main:addFrame()
-    :setPosition(1, 1)
+    :setPosition(0, 0)
     :setSize(termWidth, termHeight)
     :setBackground(colorBg)
     :setVisible(false)
 
-menuFrame:addLabel()
-    :setText("Account Menu")
-    :setPosition(2, 2)
-    :setForeground(colorPrimary)
-
-local menuAccountLabel = menuFrame:addLabel()
-    :setText("")
-    :setPosition(2, 3)
-    :setForeground(colors.lightGray)
-
 local menuBalanceLabel = menuFrame:addLabel()
     :setText("")
-    :setPosition(2, 4)
+    :setPosition(1, 1)
     :setForeground(colorSuccess)
 
 local checkBalanceBtn = menuFrame:addButton()
     :setText("Check Balance")
-    :setPosition(2, 6)
-    :setSize(15, 3)
+    :setPosition(1, 3)
+    :setSize((termWidth-2), 1)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local depositBtn = menuFrame:addButton()
     :setText("Load Balance")
-    :setPosition(18, 6)
-    :setSize(15, 3)
+    :setPosition(1, 5)
+    :setSize((termWidth-2), 1)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local withdrawBtn = menuFrame:addButton()
     :setText("Withdraw")
-    :setPosition(2, 10)
-    :setSize(15, 3)
+    :setPosition(1, 7)
+    :setSize(termWidth-2), 1)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local logoutBtn = menuFrame:addButton()
     :setText("Logout")
-    :setPosition(18, 10)
-    :setSize(15, 3)
+    :setPosition(1, 9)
+    :setSize(termWidth-2), 1)
     :setBackground(colorError)
     :setForeground(colors.white)
 
@@ -773,7 +763,6 @@ local function cardReaderThread()
                         if balSuccess then
                             atm.currentAccount = accountId
                             atm.currentBalance = balance
-                            menuAccountLabel:setText("Account: " .. accountId)
                             menuBalanceLabel:setText("Balance: " .. balance)
                             
                             -- Write balance to card
