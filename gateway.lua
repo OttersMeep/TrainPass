@@ -194,7 +194,13 @@ function gateway.sendToBalanceManager(request)
         tempChannel = math.random(20000, 65000)
     end
     
+    print("DEBUG [Gateway]: Opening temp channel " .. tempChannel .. " for request " .. request.action)
     gateway.wiredModem.open(tempChannel)
+    
+    -- Verify channel is open
+    if not gateway.wiredModem.isOpen(tempChannel) then
+        print("ERROR [Gateway]: Failed to open temp channel " .. tempChannel)
+    end
     
     gateway.wiredModem.transmit(
         gateway.balanceManagerChannel,
@@ -205,14 +211,20 @@ function gateway.sendToBalanceManager(request)
     local timer = os.startTimer(10)
     local response = nil
     
+    print("DEBUG [Gateway]: Waiting for response on " .. tempChannel)
+    
     while true do
         local event, side, channel, replyChannel, message = os.pullEvent()
         
-        if event == "modem_message" and channel == tempChannel then
-            response = textutils.unserialize(message)
-            print(response)
-            break
+        if event == "modem_message" then
+            -- print("DEBUG [Gateway]: Thread saw message on " .. tostring(channel))
+            if channel == tempChannel then
+                print("DEBUG [Gateway]: Received response on temp channel " .. tempChannel)
+                response = textutils.unserialize(message)
+                break
+            end
         elseif event == "timer" and side == timer then
+            print("DEBUG [Gateway]: Timeout waiting for response on " .. tempChannel)
             break -- Timeout, response remains nil
         end
     end
