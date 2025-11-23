@@ -405,7 +405,7 @@ local withdrawBtn = menuFrame:addButton()
 local logoutBtn = menuFrame:addButton()
     :setText("Logout")
     :setPosition(2, 9)
-    :setSize(termWidth-2), 1)
+    :setSize((termWidth-2), 1)
     :setBackground(colorError)
     :setForeground(colors.white)
 
