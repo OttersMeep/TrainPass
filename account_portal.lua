@@ -601,18 +601,20 @@ createConfirmBtn:onClick(function()
     end
     
     createStatusLabel:setText("Creating account..."):setForeground(colors.yellow)
-    basalt.update()
     
-    local success, result = portal.createAccount(username, password, cardUUID)
-    if success then
-        createStatusLabel:setText("Account created!"):setForeground(colorSuccess)
-        sleep(2)
-        createFrame:setVisible(false)
-        homeFrame:setVisible(true)
-        main:setState("currentScreen", "home")
-    else
-        createStatusLabel:setText("Error: " .. tostring(result)):setForeground(colorError)
-    end
+    -- Run account creation in a separate thread to not block UI
+    main:addThread():start(function()
+        local success, result = portal.createAccount(username, password, cardUUID)
+        if success then
+            createStatusLabel:setText("Account created!"):setForeground(colorSuccess)
+            sleep(2)
+            createFrame:setVisible(false)
+            homeFrame:setVisible(true)
+            main:setState("currentScreen", "home")
+        else
+            createStatusLabel:setText("Error: " .. tostring(result)):setForeground(colorError)
+        end
+    end)
 end)
 
 -- Create account cancel
@@ -633,24 +635,26 @@ loginConfirmBtn:onClick(function()
     end
     
     loginStatusLabel:setText("Logging in..."):setForeground(colors.yellow)
-    basalt.update()
     
-    local success, account = portal.login(username, password)
-    if success then
-        main:setState("currentUser", username)
-        main:setState("currentAccount", account)
-        
-        -- Update menu
-        menuUsernameLabel:setText("User: " .. username)
-        menuBalanceLabel:setText("Balance: " .. account.balance)
-        menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
-        
-        loginFrame:setVisible(false)
-        menuFrame:setVisible(true)
-        main:setState("currentScreen", "menu")
-    else
-        loginStatusLabel:setText("Error: " .. tostring(account)):setForeground(colorError)
-    end
+    -- Run login in a separate thread to not block UI
+    main:addThread():start(function()
+        local success, account = portal.login(username, password)
+        if success then
+            main:setState("currentUser", username)
+            main:setState("currentAccount", account)
+            
+            -- Update menu
+            menuUsernameLabel:setText("User: " .. username)
+            menuBalanceLabel:setText("Balance: " .. account.balance)
+            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+            
+            loginFrame:setVisible(false)
+            menuFrame:setVisible(true)
+            main:setState("currentScreen", "menu")
+        else
+            loginStatusLabel:setText("Error: " .. tostring(account)):setForeground(colorError)
+        end
+    end)
 end)
 
 -- Login cancel
@@ -718,55 +722,57 @@ local function cardReaderThread()
                     -- Add card to current account
                     local currentAccount = main:getState("currentAccount")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
-                    basalt.update()
                     
-                    local success, err = portal.addCard(currentAccount.accountId, info.data)
-                    if success then
-                        addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
-                        cardReader.beep(1500)
-                        sleep(2)
-                        
-                        -- Refresh account info
-                        local _, account = portal.getAccountInfo(currentAccount.accountId)
-                        if account then
-                            main:setState("currentAccount", account)
-                            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                    main:addThread():start(function()
+                        local success, err = portal.addCard(currentAccount.accountId, info.data)
+                        if success then
+                            addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
+                            cardReader.beep(1500)
+                            sleep(2)
+                            
+                            -- Refresh account info
+                            local _, account = portal.getAccountInfo(currentAccount.accountId)
+                            if account then
+                                main:setState("currentAccount", account)
+                                menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                            end
+                            
+                            addCardFrame:setVisible(false)
+                            menuFrame:setVisible(true)
+                            main:setState("currentScreen", "menu")
+                        else
+                            addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+                            cardReader.beep(500)
                         end
-                        
-                        addCardFrame:setVisible(false)
-                        menuFrame:setVisible(true)
-                        main:setState("currentScreen", "menu")
-                    else
-                        addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-                        cardReader.beep(500)
-                    end
+                    end)
                     
                 elseif screen == "remove_card" then
                     -- Remove card from current account
                     local currentAccount = main:getState("currentAccount")
                     removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
-                    basalt.update()
                     
-                    local success, err = portal.removeCard(currentAccount.accountId, info.data)
-                    if success then
-                        removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
-                        cardReader.beep(1500)
-                        sleep(2)
-                        
-                        -- Refresh account info
-                        local _, account = portal.getAccountInfo(currentAccount.accountId)
-                        if account then
-                            main:setState("currentAccount", account)
-                            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                    main:addThread():start(function()
+                        local success, err = portal.removeCard(currentAccount.accountId, info.data)
+                        if success then
+                            removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
+                            cardReader.beep(1500)
+                            sleep(2)
+                            
+                            -- Refresh account info
+                            local _, account = portal.getAccountInfo(currentAccount.accountId)
+                            if account then
+                                main:setState("currentAccount", account)
+                                menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                            end
+                            
+                            removeCardFrame:setVisible(false)
+                            menuFrame:setVisible(true)
+                            main:setState("currentScreen", "menu")
+                        else
+                            removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+                            cardReader.beep(500)
                         end
-                        
-                        removeCardFrame:setVisible(false)
-                        menuFrame:setVisible(true)
-                        main:setState("currentScreen", "menu")
-                    else
-                        removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-                        cardReader.beep(500)
-                    end
+                    end)
                 end
             end
         end)
