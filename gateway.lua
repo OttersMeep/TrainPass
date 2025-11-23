@@ -226,9 +226,8 @@ function gateway.sendToBalanceManager(request)
         elseif event == "timer" and side == timer then
             print("DEBUG [Gateway]: Timeout waiting for response on " .. tempChannel)
             break -- Timeout, response remains nil
-        else
-            print(event)
         end
+        print(event)
     end
     
     gateway.wiredModem.close(tempChannel)
