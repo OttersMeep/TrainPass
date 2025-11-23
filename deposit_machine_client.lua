@@ -787,6 +787,7 @@ local function cardReaderThread()
                             homeFrame:setVisible(false)
                             menuFrame:setVisible(true)
                             currentScreen = "menu"
+                            basalt.update()
                         else
                             statusLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
                             
@@ -797,6 +798,7 @@ local function cardReaderThread()
                             cardReader.beep(400)
                             sleep(0.3)
                             cardReader.setLight("RED", false)
+                            basalt.update()
                         end
                     end
                 elseif currentScreen == "menu" then
