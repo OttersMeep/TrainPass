@@ -120,7 +120,7 @@ end
 function gateway.decryptMessage(encryptedMessage)
     local packet = textutils.unserialize(encryptedMessage)
     
-    if not packet or not packet.encryptedData then
+    if not packet or not packet.encryptedData or not packet.machineId then
         return nil, "Invalid packet format"
     end
     
@@ -132,8 +132,17 @@ function gateway.decryptMessage(encryptedMessage)
         end
     end
     
-    -- Decrypt with gateway's private key
-    local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, gateway.privateKey)
+    -- Get the machine's public key
+    local machinePublicKey = gateway.depositMachines[packet.machineId]
+    if not machinePublicKey then
+        return nil, "Machine not registered: " .. packet.machineId
+    end
+    
+    -- Derive shared secret using gateway's private key and machine's public key
+    local sharedSecret = ecc.exchange(gateway.privateKey, machinePublicKey)
+    
+    -- Decrypt with shared secret
+    local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, sharedSecret)
     if not success then
         return nil, "Decryption failed"
     end

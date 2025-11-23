@@ -66,6 +66,10 @@ print("Configuration loaded successfully")
 print("Private key: " .. #atm.config.privateKey .. " bytes")
 print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 
+-- Derive shared secret for encryption
+atm.sharedSecret = ecc.exchange(atm.config.privateKey, atm.config.gatewayPublicKey)
+print("Shared secret derived: " .. #atm.sharedSecret .. " bytes")
+
 -- Find inventory (hopper on right)
 local inventory = peripheral.wrap(atm.config.inventorySide)
 if not inventory then
@@ -130,15 +134,16 @@ atm.waitingForResponse = false
 function atm.sendRequest(requestData)
     atm.waitingForResponse = true
     
-    -- Encrypt the request data with the gateway's public key
+    -- Encrypt the request data with the shared secret
     local serializedData = textutils.serialize(requestData.data)
-    local encryptedData = ecc.encrypt(serializedData, atm.config.gatewayPublicKey)
+    local encryptedData = ecc.encrypt(serializedData, atm.sharedSecret)
     
-    -- Send encrypted packet
+    -- Send encrypted packet with machine ID for key derivation
     modem.transmit(
         atm.config.gatewayChannel,
         atm.config.responseChannel,
         textutils.serialize({
+            machineId = atm.config.machineId,  -- Gateway needs this to derive shared secret
             encryptedData = encryptedData,
             timestamp = requestData.timestamp
         })
