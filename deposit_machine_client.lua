@@ -10,9 +10,10 @@ if not fs.exists("basalt.lua") then
         error("Failed to download Basalt! Please install manually.")
     end
 end
-local ecc = require("ecc")
 local basalt = require("basalt")
 
+
+local ecc = require("ecc")
 local atm = {}
 
 -- Configuration (will be overridden by machine_config.lua if it exists)
@@ -224,13 +225,18 @@ end
 function atm.checkBalance(accountId)
     local timestamp = os.epoch("utc")
     
+    -- Create signature for the request
+    local signedMessage = accountId .. "0" .. timestamp
+    local signature = ecc.sign(atm.config.privateKey, signedMessage)
+    
     atm.sendRequest({
         data = {
             requestType = "DEPOSIT",
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = 0,  -- 0 amount = balance check
-            timestamp = timestamp
+            timestamp = timestamp,
+            signature = signature
         },
         timestamp = timestamp
     })
@@ -248,13 +254,18 @@ function atm.processDeposit(accountId, diamonds)
     local amount = diamonds * atm.config.diamondValue
     local timestamp = os.epoch("utc")
     
+    -- Create signature for the request
+    local signedMessage = accountId .. amount .. timestamp
+    local signature = ecc.sign(atm.config.privateKey, signedMessage)
+    
     atm.sendRequest({
         data = {
             requestType = "DEPOSIT",
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = amount,
-            timestamp = timestamp
+            timestamp = timestamp,
+            signature = signature
         },
         timestamp = timestamp
     })
@@ -279,13 +290,18 @@ function atm.processWithdrawal(accountId, diamonds)
     local amount = diamonds * atm.config.diamondValue
     local timestamp = os.epoch("utc")
     
+    -- Create signature for the request (negative amount for withdrawal)
+    local signedMessage = accountId .. (-amount) .. timestamp
+    local signature = ecc.sign(atm.config.privateKey, signedMessage)
+    
     atm.sendRequest({
         data = {
             requestType = "DEPOSIT",
             depositMachineId = atm.config.machineId,
             accountId = accountId,
             amount = -amount,  -- Negative amount = withdrawal
-            timestamp = timestamp
+            timestamp = timestamp,
+            signature = signature
         },
         timestamp = timestamp
     })
