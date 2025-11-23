@@ -210,6 +210,7 @@ function gateway.sendToBalanceManager(request)
         
         if event == "modem_message" and channel == tempChannel then
             response = textutils.unserialize(message)
+            print(response)
             break
         elseif event == "timer" and side == timer then
             break -- Timeout, response remains nil
