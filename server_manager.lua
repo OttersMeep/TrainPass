@@ -230,11 +230,12 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         local serializedGatewayPublicKey = textutils.serialize(config.gatewayPublicKey or {})
         
         -- Replace placeholders with actual values
+        -- Use string format with %% to escape special pattern characters
         templateContent = templateContent:gsub("%%MACHINE_ID%%", machineId)
-        templateContent = templateContent:gsub("%%PRIVATE_KEY%%", serializedPrivateKey)
+        templateContent = templateContent:gsub("%%PRIVATE_KEY%%", function() return serializedPrivateKey end)
         templateContent = templateContent:gsub("%%MACHINE_TYPE%%", machineType)
         templateContent = templateContent:gsub("%%GATEWAY_CHANNEL%%", tostring(config.gatewayChannel or 1000))
-        templateContent = templateContent:gsub("%%GATEWAY_PUBLIC_KEY%%", serializedGatewayPublicKey)
+        templateContent = templateContent:gsub("%%GATEWAY_PUBLIC_KEY%%", function() return serializedGatewayPublicKey end)
         
         configFile.write(templateContent)
         configFile.close()
