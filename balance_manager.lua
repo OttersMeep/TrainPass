@@ -488,6 +488,8 @@ function balanceManager.run()
         
         local response = balanceManager.handleRequest(message)
         if response then
+            print("[DEBUG] Sending: " .. textutils.serialize(response))
+            print("on channel " .. replyChannel)
             balanceManager.modem.transmit(replyChannel, channel, textutils.serialize(response))
         end
         
