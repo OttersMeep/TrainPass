@@ -704,60 +704,25 @@ local function cardReaderThread()
     if not cardReader then return end
     
     while true do
-        local event, info = os.pullEvent("card_read")
-        
-        if event == "card_read" and info and info.data then
-            -- Only process cards on home or menu screen
-            if currentScreen == "home" then
-                -- Beep and light to indicate card read
-                cardReader.beep(1000)
-                cardReader.setLight("YELLOW", true)
-                sleep(0.1)
-                cardReader.setLight("YELLOW", false)
-                
-                statusLabel:setText("Reading card..."):setForeground(colors.yellow)
-                basalt.update()
-                
-                -- Look up account from card UUID
-                local success, accountId = atm.getAccountByCard(info.data)
-                if not success then
-                    statusLabel:setText("Error: " .. accountId):setForeground(colorError)
-                    
-                    -- Error beep and light
-                    cardReader.setLight("RED", true)
-                    cardReader.beep(500)
+        local success, err = pcall(function()
+            local event, info = os.pullEvent("card_read")
+            
+            if event == "card_read" and info and info.data then
+                -- Only process cards on home or menu screen
+                if currentScreen == "home" then
+                    -- Beep and light to indicate card read
+                    cardReader.beep(1000)
+                    cardReader.setLight("YELLOW", true)
                     sleep(0.1)
-                    cardReader.beep(400)
-                    sleep(0.3)
-                    cardReader.setLight("RED", false)
-                else
-                    statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
+                    cardReader.setLight("YELLOW", false)
+                    
+                    statusLabel:setText("Reading card..."):setForeground(colors.yellow)
                     basalt.update()
                     
-                    -- Get balance for this account
-                    local balSuccess, balance = atm.checkBalance(accountId)
-                    if balSuccess then
-                        atm.currentAccount = accountId
-                        atm.currentBalance = balance
-                        menuAccountLabel:setText("Account: " .. accountId)
-                        menuBalanceLabel:setText("Balance: " .. balance)
-                        
-                        -- Write balance to card
-                        cardReader.write(info.data, "Balance: " .. balance)
-                        
-                        -- Success beep and light
-                        cardReader.setLight("GREEN", true)
-                        cardReader.beep(1500)
-                        sleep(0.1)
-                        cardReader.beep(1800)
-                        sleep(0.2)
-                        cardReader.setLight("GREEN", false)
-                        
-                        homeFrame:setVisible(false)
-                        menuFrame:setVisible(true)
-                        currentScreen = "menu"
-                    else
-                        statusLabel:setText("Error: " .. balance):setForeground(colorError)
+                    -- Look up account from card UUID
+                    local success, accountId = atm.getAccountByCard(info.data)
+                    if not success then
+                        statusLabel:setText("Error: " .. tostring(accountId)):setForeground(colorError)
                         
                         -- Error beep and light
                         cardReader.setLight("RED", true)
@@ -766,19 +731,61 @@ local function cardReaderThread()
                         cardReader.beep(400)
                         sleep(0.3)
                         cardReader.setLight("RED", false)
+                    else
+                        statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
+                        basalt.update()
+                        
+                        -- Get balance for this account
+                        local balSuccess, balance = atm.checkBalance(accountId)
+                        if balSuccess then
+                            atm.currentAccount = accountId
+                            atm.currentBalance = balance
+                            menuAccountLabel:setText("Account: " .. accountId)
+                            menuBalanceLabel:setText("Balance: " .. balance)
+                            
+                            -- Write balance to card
+                            cardReader.write(info.data, "Balance: " .. balance)
+                            
+                            -- Success beep and light
+                            cardReader.setLight("GREEN", true)
+                            cardReader.beep(1500)
+                            sleep(0.1)
+                            cardReader.beep(1800)
+                            sleep(0.2)
+                            cardReader.setLight("GREEN", false)
+                            
+                            homeFrame:setVisible(false)
+                            menuFrame:setVisible(true)
+                            currentScreen = "menu"
+                        else
+                            statusLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
+                            
+                            -- Error beep and light
+                            cardReader.setLight("RED", true)
+                            cardReader.beep(500)
+                            sleep(0.1)
+                            cardReader.beep(400)
+                            sleep(0.3)
+                            cardReader.setLight("RED", false)
+                        end
+                    end
+                elseif currentScreen == "menu" then
+                    -- Update card with current balance (verify card matches current account)
+                    local success, accountId = atm.getAccountByCard(info.data)
+                    if success and accountId == atm.currentAccount then
+                        cardReader.write(info.data, "Balance: " .. atm.currentBalance)
+                        cardReader.beep(1200)
+                        cardReader.setLight("GREEN", true)
+                        sleep(0.1)
+                        cardReader.setLight("GREEN", false)
                     end
                 end
-            elseif currentScreen == "menu" then
-                -- Update card with current balance (verify card matches current account)
-                local success, accountId = atm.getAccountByCard(info.data)
-                if success and accountId == atm.currentAccount then
-                    cardReader.write(info.data, "Balance: " .. atm.currentBalance)
-                    cardReader.beep(1200)
-                    cardReader.setLight("GREEN", true)
-                    sleep(0.1)
-                    cardReader.setLight("GREEN", false)
-                end
             end
+        end)
+        
+        if not success then
+            print("Card reader error: " .. tostring(err))
+            statusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
         end
     end
 end
