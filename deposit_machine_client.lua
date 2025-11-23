@@ -33,7 +33,18 @@ if fs.exists("machine_config.lua") then
     local machineConfig = dofile("machine_config.lua")
     if machineConfig then
         atm.config.machineId = machineConfig.machineId or atm.config.machineId
-        atm.config.privateKey = machineConfig.privateKey or atm.config.privateKey
+        -- Deserialize private key if it's a string
+        if type(machineConfig.privateKey) == "string" then
+            atm.config.privateKey = textutils.unserialize(machineConfig.privateKey)
+        else
+            atm.config.privateKey = machineConfig.privateKey
+        end
+        -- Deserialize gateway public key if it's a string
+        if type(machineConfig.gatewayPublicKey) == "string" then
+            atm.config.gatewayPublicKey = textutils.unserialize(machineConfig.gatewayPublicKey)
+        else
+            atm.config.gatewayPublicKey = machineConfig.gatewayPublicKey
+        end
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
         atm.config.dispenserSide = machineConfig.dispenserSide or atm.config.dispenserSide
         atm.config.inventorySide = machineConfig.inventorySide or atm.config.inventorySide
