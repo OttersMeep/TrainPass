@@ -173,6 +173,8 @@ end
 function atm.getAccountByCard(cardUUID)
     local timestamp = os.epoch("utc")
     
+    print("Looking up account for card: " .. tostring(cardUUID))
+    
     atm.sendRequest({
         data = {
             requestType = "GET_ACCOUNT_BY_CARD",
@@ -183,7 +185,10 @@ function atm.getAccountByCard(cardUUID)
         timestamp = timestamp
     })
     
+    print("Request sent, waiting for response...")
     local response, err = atm.waitForResponse(10)
+    print("Response received: " .. textutils.serialize(response or {error = err}))
+    
     if response and response.success and response.accountId then
         return true, response.accountId
     else
@@ -723,6 +728,7 @@ local function cardReaderThread()
                     local success, accountId = atm.getAccountByCard(info.data)
                     if not success then
                         statusLabel:setText("Error: " .. tostring(accountId)):setForeground(colorError)
+                        basalt.update()
                         
                         -- Error beep and light
                         cardReader.setLight("RED", true)

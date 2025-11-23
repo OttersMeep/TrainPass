@@ -385,6 +385,7 @@ end
 
 -- Handle GET_ACCOUNT_BY_CARD request
 function gateway.handleGetAccountByCard(data, replyChannel)
+    print(textutils.serialize(data))
     if not data.cardUUID then
         gateway.sendWireless(replyChannel, {
             success = false,
@@ -410,7 +411,7 @@ function gateway.handleGetAccountByCard(data, replyChannel)
     while true do
         local event, side, channel, respChannel, message = os.pullEvent()
         
-        if event == "modem_message" and channel == gateway.wirelessChannel then
+        if event == "modem_message" and channel == gateway.wiredChannel then
             os.cancelTimer(timer)
             local response = textutils.unserialize(message)
             
@@ -426,7 +427,7 @@ function gateway.handleGetAccountByCard(data, replyChannel)
                 })
             end
             return
-        elseif event == "timer" and side == timer then
+        elseif event == "timer" then
             gateway.sendWireless(replyChannel, {
                 success = false,
                 error = "Internal server timeout"
