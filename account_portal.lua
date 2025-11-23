@@ -52,9 +52,6 @@ print("Machine ID: " .. portal.config.machineId)
 portal.sharedSecret = ecc.exchange(portal.config.privateKey, portal.config.gatewayPublicKey)
 print("Shared secret derived")
 
--- Password storage (hashed)
-portal.passwords = {}  -- accountId -> passwordHash
-
 -- Find card reader
 local cardReader = peripheral.find("card_reader")
 if not cardReader then
@@ -79,11 +76,6 @@ modem.open(portal.config.responseChannel)
 portal.currentUser = nil
 portal.currentAccount = nil
 portal.waitingForResponse = false
-
--- Hash password
-function portal.hashPassword(password)
-    return ecc.sha256.digest(password):toHex()
-end
 
 -- Send request to gateway
 function portal.sendRequest(requestData)
@@ -234,33 +226,6 @@ function portal.getAccountInfo(accountId)
         return false, response and response.error or err or "Account not found"
     end
 end
-
--- Save passwords to disk
-function portal.savePasswords()
-    local file = fs.open("portal_passwords.dat", "w")
-    if file then
-        file.write(textutils.serialize(portal.passwords))
-        file.close()
-    end
-end
-
--- Load passwords from disk
-function portal.loadPasswords()
-    if fs.exists("portal_passwords.dat") then
-        local file = fs.open("portal_passwords.dat", "r")
-        if file then
-            local data = textutils.unserialize(file.readAll())
-            file.close()
-            if data then
-                portal.passwords = data
-                print("Loaded password database")
-            end
-        end
-    end
-end
-
--- Load passwords
-portal.loadPasswords()
 
 -- Create Basalt UI
 local main = basalt.createFrame()

@@ -321,12 +321,14 @@ end
 -- Handle incoming requests
 function balanceManager.handleRequest(message)
     local request = textutils.unserialize(message)
+    print(message)
     if not request then return nil end
     
     if request.action == "CREATE_ACCOUNT" then
         local accountId, err = balanceManager.createAccount(
             request.username,
             request.publicKey,
+            request.passwordHash,
             request.initialBalance,
             request.cardUUIDs
         )
