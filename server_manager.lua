@@ -208,11 +208,15 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
     end
     
     -- Check if there's a template machine_config.lua to use
-    local useTemplate = fs.exists("machine_config_template.lua")
+    local templateFile = "machine_config_template.lua"
+    if machineType == "portal" and fs.exists("portal_config_template.lua") then
+        templateFile = "portal_config_template.lua"
+    end
+    local useTemplate = fs.exists(templateFile)
     
     if useTemplate then
         -- Copy template and modify it
-        local template = fs.open("machine_config_template.lua", "r")
+        local template = fs.open(templateFile, "r")
         local configFile = fs.open(fs.combine(mountPath, "machine_config.lua"), "w")
         
         if not template or not configFile then
@@ -280,6 +284,8 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         clientFile = "deposit_machine_client.lua"
     elseif machineType == "terminal" then
         clientFile = "payment_terminal.lua"
+    elseif machineType == "portal" then
+        clientFile = "account_portal.lua"
     end
     
     if clientFile and fs.exists(clientFile) then
@@ -324,8 +330,14 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
         readmeFile.writeLine("2. Attach wireless modem")
         if machineType == "deposit" then
             readmeFile.writeLine("3. Attach chest for diamond deposits")
+            readmeFile.writeLine("4. Attach monitor on top (optional)")
+            readmeFile.writeLine("5. Turn on computer - it will start automatically!")
+        elseif machineType == "portal" then
+            readmeFile.writeLine("3. Attach card reader")
+            readmeFile.writeLine("4. Turn on computer - it will start automatically!")
+        else
+            readmeFile.writeLine("3. Turn on computer - it will start automatically!")
         end
-        readmeFile.writeLine("3. Turn on computer - it will start automatically!")
         readmeFile.writeLine("")
         readmeFile.writeLine("IMPORTANT: Keep private key secure!")
         readmeFile.close()
@@ -538,7 +550,7 @@ function serverManager.cli()
     print("")
     print("=== Server Manager CLI ===")
     print("Commands:")
-    print("  register <deposit|terminal> [number] - Provision machines (default 1)")
+    print("  register <deposit|terminal|portal> [number] - Provision machines (default 1)")
     print("  list - List registered machines")
     print("  help - Show this help")
     print("  exit - Exit program")
@@ -560,12 +572,12 @@ function serverManager.cli()
             local count = tonumber(parts[3]) or 1
             
             if not machineType then
-                print("ERROR: Missing machine type. Usage: register <deposit|terminal> [number]")
+                print("ERROR: Missing machine type. Usage: register <deposit|terminal|portal> [number]")
                 goto continue
             end
             
-            if machineType ~= "deposit" and machineType ~= "terminal" then
-                print("ERROR: Invalid machine type. Must be 'deposit' or 'terminal'")
+            if machineType ~= "deposit" and machineType ~= "terminal" and machineType ~= "portal" then
+                print("ERROR: Invalid machine type. Must be 'deposit', 'terminal', or 'portal'")
                 goto continue
             end
             
@@ -584,6 +596,8 @@ function serverManager.cli()
                 config.vendorType = "TERMINAL"
                 config.defaultAmount = 10
                 config.location = "Auto-provisioned"
+            elseif machineType == "portal" then
+                -- No additional config needed for portal
             end
             
             -- Start batch provisioning
@@ -595,12 +609,13 @@ function serverManager.cli()
         elseif command == "help" then
             print("")
             print("Commands:")
-            print("  register <deposit|terminal> [number]")
+            print("  register <deposit|terminal|portal> [number]")
             print("    Provision one or more machines")
             print("    Examples:")
             print("      register deposit       - Provision 1 deposit machine")
             print("      register deposit 5     - Provision 5 deposit machines")
             print("      register terminal 10   - Provision 10 payment terminals")
+            print("      register portal        - Provision 1 account portal")
             print("")
             print("  list")
             print("    Show all registered machines")

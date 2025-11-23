@@ -138,6 +138,16 @@ function balanceManager.getAccountByCard(cardUUID)
     return nil
 end
 
+-- Get account by username
+function balanceManager.getAccountByUsername(username)
+    for _, account in pairs(balanceManager.accounts) do
+        if account.username == username then
+            return account
+        end
+    end
+    return nil
+end
+
 -- Get account by ID
 function balanceManager.getAccount(accountId)
     return balanceManager.accounts[accountId]
@@ -323,6 +333,13 @@ function balanceManager.handleRequest(message)
         
     elseif request.action == "GET_ACCOUNT_BY_CARD" then
         local account = balanceManager.getAccountByCard(request.cardUUID)
+        return {
+            success = account ~= nil,
+            account = account
+        }
+        
+    elseif request.action == "GET_ACCOUNT_BY_USERNAME" then
+        local account = balanceManager.getAccountByUsername(request.username)
         return {
             success = account ~= nil,
             account = account
