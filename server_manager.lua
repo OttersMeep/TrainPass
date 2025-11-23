@@ -157,13 +157,15 @@ function serverManager.registerWithGateway(machineId, publicKey)
         local event, side, channel, replyChannel, message, distance = os.pullEvent()
         
         if event == "modem_message" and channel == serverManager.config.responseChannel then
+            print("  Received response: " .. tostring(message))
             local response = textutils.unserialize(message)
+            print("  Unserialized: " .. textutils.serialize(response))
             if response then
                 os.cancelTimer(timer)
                 if response.success then
                     return true, nil
                 else
-                    return false, response.error
+                    return false, response.error or "Unknown error"
                 end
             end
         elseif event == "timer" and side == timer then

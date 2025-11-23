@@ -17,7 +17,8 @@ gateway.publicKey = nil
 
 -- Channels
 gateway.wirelessChannel = 1000 -- External channel for wireless clients
-gateway.balanceManagerChannel = 101
+gateway.wiredChannel = 101 -- Gateway's internal wired channel
+gateway.balanceManagerChannel = 102 -- Balance manager's channel
 gateway.ledgerChannel = 100
 
 -- Deposit machine registry (machineId -> publicKey)
@@ -73,12 +74,13 @@ function gateway.init()
         error("No wireless modem found!")
     end
     
-    gateway.wiredModem.open(gateway.balanceManagerChannel)
+    gateway.wiredModem.open(gateway.wiredChannel)
     gateway.wirelessModem.open(gateway.wirelessChannel)
     
     print("Gateway initialized")
     print("Wireless channel: " .. gateway.wirelessChannel)
-    print("Internal channels: " .. gateway.balanceManagerChannel)
+    print("Wired channel: " .. gateway.wiredChannel)
+    print("Balance Manager channel: " .. gateway.balanceManagerChannel)
 end
 
 -- Register a deposit machine
@@ -307,13 +309,19 @@ function gateway.sendWireless(channel, data)
 end
 
 function gateway.sendWired(channel, data)
-    gateway.wiredModem.transmit(channel, gateway.balanceManagerChannel, textutils.serialize(data))
+    gateway.wiredModem.transmit(channel, gateway.wiredChannel, textutils.serialize(data))
 end
 
 -- Handle machine registration (from wired network - server manager)
 function gateway.handleMachineRegistration(data, replyChannel)
+    print("DEBUG: handleMachineRegistration called")
+    print("  machineId: " .. tostring(data.machineId))
+    print("  publicKey exists: " .. tostring(data.publicKey ~= nil))
+    print("  replyChannel: " .. tostring(replyChannel))
+    
     if not data.machineId or not data.publicKey then
-        gateway.wiredModem.transmit(replyChannel, gateway.balanceManagerChannel, textutils.serialize({
+        print("  ERROR: Missing data, sending failure")
+        gateway.wiredModem.transmit(replyChannel, gateway.wiredChannel, textutils.serialize({
             success = false,
             error = "Missing machineId or publicKey"
         }))
@@ -328,11 +336,15 @@ function gateway.handleMachineRegistration(data, replyChannel)
     
     print("Registered machine: " .. data.machineId)
     
-    -- Send success response
-    gateway.wiredModem.transmit(replyChannel, gateway.balanceManagerChannel, textutils.serialize({
+    -- Send success response to the replyChannel (not balanceManagerChannel)
+    local response = {
         success = true,
         machineId = data.machineId
-    }))
+    }
+    print("  Sending response: " .. textutils.serialize(response))
+    print("  To channel: " .. replyChannel)
+    gateway.wiredModem.transmit(replyChannel, gateway.wiredChannel, textutils.serialize(response))
+    print("  Response sent!")
 end
 
 -- Handle wireless message
@@ -482,7 +494,7 @@ function gateway.run()
         if side == peripheral.getName(gateway.wirelessModem) and channel == gateway.wirelessChannel then
             gateway.handleWirelessMessage(message, replyChannel)
         -- Check if from wired (internal - server manager)
-        elseif side == peripheral.getName(gateway.wiredModem) and channel == gateway.balanceManagerChannel then
+        elseif side == peripheral.getName(gateway.wiredModem) and channel == gateway.wiredChannel then
             gateway.handleWiredMessage(message, replyChannel)
         end
         
