@@ -358,15 +358,22 @@ end
 
 -- Handle wireless message
 function gateway.handleWirelessMessage(message, replyChannel)
+    print("DEBUG [Gateway]: Received wireless message on reply channel " .. replyChannel)
+    
     local data, err = gateway.decryptMessage(message)
     
+    print("DEBUG [Gateway]: Decryption result - data: " .. tostring(data ~= nil) .. ", err: " .. tostring(err))
+    
     if not data then
+        print("DEBUG [Gateway]: Decryption failed, sending error response")
         gateway.sendWireless(replyChannel, {
             success = false,
             error = err or "Decryption failed"
         })
         return
     end
+    
+    print("DEBUG [Gateway]: Request type: " .. tostring(data.requestType))
     
     -- Route based on request type
     if data.requestType == "DEPOSIT" then
@@ -376,6 +383,7 @@ function gateway.handleWirelessMessage(message, replyChannel)
     elseif data.requestType == "GET_ACCOUNT_BY_CARD" then
         gateway.handleGetAccountByCard(data, replyChannel)
     elseif data.requestType == "CREATE_ACCOUNT" then
+        print("DEBUG [Gateway]: Routing to handleCreateAccount")
         gateway.handleCreateAccount(data, replyChannel)
     elseif data.requestType == "GET_ACCOUNT_BY_USERNAME" then
         gateway.handleGetAccountByUsername(data, replyChannel)
@@ -386,6 +394,7 @@ function gateway.handleWirelessMessage(message, replyChannel)
     elseif data.requestType == "GET_ACCOUNT" then
         gateway.handleGetAccount(data, replyChannel)
     else
+        print("DEBUG [Gateway]: Unknown request type")
         gateway.sendWireless(replyChannel, {
             success = false,
             error = "Unknown request type"
@@ -449,7 +458,12 @@ end
 
 -- Handle CREATE_ACCOUNT request
 function gateway.handleCreateAccount(data, replyChannel)
+    print("DEBUG [Gateway]: handleCreateAccount called")
+    print("  username: " .. tostring(data.username))
+    print("  replyChannel: " .. tostring(replyChannel))
+    
     if not data.username then
+        print("DEBUG [Gateway]: Missing username, sending error")
         gateway.sendWireless(replyChannel, {
             success = false,
             error = "Missing username"
@@ -466,11 +480,16 @@ function gateway.handleCreateAccount(data, replyChannel)
         cardUUIDs = {}  -- Empty initially, cards added later
     }
     
+    print("DEBUG [Gateway]: Sending to balance manager on channel " .. gateway.balanceManagerChannel)
+    print("  Request: " .. textutils.serialize(request))
+    
     gateway.wiredModem.transmit(
         gateway.balanceManagerChannel,
-        gateway.wirelessChannel,
+        gateway.wiredChannel,
         textutils.serialize(request)
     )
+    
+    print("DEBUG [Gateway]: Waiting for response from balance manager...")
     
     -- Wait for response from balance manager
     local timer = os.startTimer(10)
@@ -479,10 +498,13 @@ function gateway.handleCreateAccount(data, replyChannel)
         
         if event == "modem_message" and channel == gateway.wiredChannel then
             os.cancelTimer(timer)
+            print("DEBUG [Gateway]: Received response from balance manager")
             local response = textutils.unserialize(message)
+            print("  Response: " .. textutils.serialize(response))
             gateway.sendWireless(replyChannel, response)
             return
         elseif event == "timer" then
+            print("DEBUG [Gateway]: Timeout waiting for balance manager")
             gateway.sendWireless(replyChannel, {
                 success = false,
                 error = "Internal server timeout"
