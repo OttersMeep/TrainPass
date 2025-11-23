@@ -17,7 +17,7 @@ gateway.publicKey = nil
 
 -- Channels
 gateway.wirelessChannel = 1000 -- External channel for wireless clients
-gateway.wiredChannel = 101 -- Gateway's internal wired channel
+gateway.wiredChannel = 105 -- Gateway's internal wired channel
 gateway.balanceManagerChannel = 102 -- Balance manager's channel
 gateway.ledgerChannel = 100
 
