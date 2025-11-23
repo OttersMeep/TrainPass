@@ -48,21 +48,30 @@ end
 
 -- Create account
 function balanceManager.createAccount(username, publicKey, initialBalance, cardUUIDs)
+    print("DEBUG [Balance Manager]: createAccount called")
+    print("  username: " .. tostring(username))
+    print("  publicKey: " .. tostring(publicKey))
+    print("  initialBalance: " .. tostring(initialBalance))
+    print("  cardUUIDs: " .. textutils.serialize(cardUUIDs))
+    
     initialBalance = initialBalance or 0
     cardUUIDs = cardUUIDs or {}
     
     if not username or username == "" then
+        print("DEBUG [Balance Manager]: Username required - returning error")
         return nil, "Username required"
     end
     
     -- Check username uniqueness
     for _, account in pairs(balanceManager.accounts) do
         if account.username == username then
+            print("DEBUG [Balance Manager]: Username already exists - returning error")
             return nil, "Username already exists"
         end
     end
     
     local accountId = balanceManager.generateAccountId(username)
+    print("DEBUG [Balance Manager]: Generated accountId: " .. accountId)
     
     balanceManager.accounts[accountId] = {
         accountId = accountId,
@@ -73,6 +82,8 @@ function balanceManager.createAccount(username, publicKey, initialBalance, cardU
         createdAt = os.epoch("utc"),
         active = true
     }
+    
+    print("DEBUG [Balance Manager]: Account created in memory")
     
     -- Register card UUIDs
     for _, uuid in ipairs(cardUUIDs) do
@@ -87,6 +98,7 @@ function balanceManager.createAccount(username, publicKey, initialBalance, cardU
         metadata = { username = username }
     })
     
+    print("DEBUG [Balance Manager]: Returning accountId: " .. accountId)
     return accountId, nil
 end
 
