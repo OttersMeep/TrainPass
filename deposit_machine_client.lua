@@ -1,8 +1,4 @@
--- TrainPass ATM Machine with Basalt UI
--- Full-featured deposit/withdrawal machine
--- Supports: Balance loading, balance checking, withdrawals
-
--- Check for Basalt
+local ecc = require("ecc")
 if not fs.exists("basalt.lua") then
     print("Downloading Basalt UI library...")
     shell.run("wget", "run", "https://basalt.madefor.cc/install.lua", "release", "latest.lua", "basalt.lua")
@@ -12,8 +8,6 @@ if not fs.exists("basalt.lua") then
 end
 local basalt = require("basalt")
 
-
-local ecc = require("ecc")
 local atm = {}
 
 -- Configuration (will be overridden by machine_config.lua if it exists)
