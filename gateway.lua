@@ -614,6 +614,14 @@ function gateway.run()
             break
         end
         
+        -- Debug: Log unhandled modem messages to see if they arrive
+        if event == "modem_message" then
+            local side, channel = eventData[2], eventData[3]
+            if channel ~= gateway.wirelessChannel and channel ~= gateway.wiredChannel then
+                -- print("DEBUG [Gateway]: Main loop received message on ephemeral channel: " .. channel)
+            end
+        end
+        
         -- 1. Spawn new threads for incoming messages
         if event == "modem_message" then
             local side, channel, replyChannel, message = eventData[2], eventData[3], eventData[4], eventData[5]
@@ -638,7 +646,8 @@ function gateway.run()
                 local ok, result = coroutine.resume(co)
                 if ok then
                     if coroutine.status(co) ~= "dead" then
-                        routines[co] = result
+                        -- FIX: If result is nil (no filter), use a placeholder so the key isn't deleted
+                        routines[co] = result or "ALL"
                     end
                 else
                     print("Error starting thread: " .. tostring(result))
@@ -649,7 +658,8 @@ function gateway.run()
         -- 2. Resume existing threads
         local dead = {}
         for co, filter in pairs(routines) do
-            if filter == nil or filter == event then
+            -- FIX: Check for placeholder "ALL"
+            if filter == "ALL" or filter == nil or filter == event then
                 local ok, result = coroutine.resume(co, table.unpack(eventData))
                 if not ok then
                     print("Thread error: " .. tostring(result))
@@ -657,7 +667,8 @@ function gateway.run()
                 elseif coroutine.status(co) == "dead" then
                     dead[co] = true
                 else
-                    routines[co] = result
+                    -- FIX: If result is nil (no filter), use a placeholder
+                    routines[co] = result or "ALL"
                 end
             end
         end
