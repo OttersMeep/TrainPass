@@ -226,7 +226,7 @@ function gateway.sendToBalanceManager(request)
         elseif event == "timer" and side == timer then
             print("DEBUG [Gateway]: Timeout waiting for response on " .. tempChannel)
             break -- Timeout, response remains nil
-        elseif
+        else
             print(event)
         end
     end
