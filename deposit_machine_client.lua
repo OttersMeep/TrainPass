@@ -167,6 +167,15 @@ function atm.waitForResponse(timeout)
                 -- Decrypt using shared secret
                 local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, atm.sharedSecret)
                 if success then
+                    -- FIX: If decrypt returns a byte array (table), convert it to a string first
+                    if type(decrypted) == "table" then
+                        local chars = {}
+                        for i = 1, #decrypted do
+                            chars[i] = string.char(decrypted[i])
+                        end
+                        decrypted = table.concat(chars)
+                    end
+
                     local response = textutils.unserialize(decrypted)
                     return response
                 else
