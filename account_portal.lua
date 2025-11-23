@@ -132,7 +132,7 @@ function portal.createAccount(username, password)
         timestamp = timestamp
     })
     
-    local response, err = portal.waitForResponse(10)
+    local response, err = portal.waitForResponse(30)
     if response and response.success and response.accountId then
         return true, response.accountId
     else

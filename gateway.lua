@@ -208,7 +208,7 @@ function gateway.sendToBalanceManager(request)
         textutils.serialize(request)
     )
     
-    local timer = os.startTimer(10)
+    local timer = os.startTimer(30)
     local response = nil
     
     print("DEBUG [Gateway]: Waiting for response on " .. tempChannel)
