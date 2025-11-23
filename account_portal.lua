@@ -581,7 +581,7 @@ createConfirmBtn:onClick(function()
     createStatusLabel:setText("Creating account..."):setForeground(colors.yellow)
     
     -- Schedule the network operation to run after UI updates
-    main:schedule(function()
+    basalt.schedule(function()
         local success, result = portal.createAccount(username, password)
         if success then
             createStatusLabel:setText("Account created! You can now login."):setForeground(colorSuccess)
@@ -615,7 +615,7 @@ loginConfirmBtn:onClick(function()
     loginStatusLabel:setText("Logging in..."):setForeground(colors.yellow)
     
     -- Schedule the network operation to run after UI updates
-    main:schedule(function()
+    basalt.schedule(function()
         local success, account = portal.login(username, password)
         if success then
             main:setState("currentUser", username)
