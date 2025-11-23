@@ -422,7 +422,7 @@ function gateway.handleWiredMessage(message, replyChannel)
         gateway.handleMachineRegistration(data, replyChannel)
     elseif data.requestType == "GET_PUBLIC_KEY" then
         -- Return the gateway's public key for encryption
-        gateway.sendWired(replyChannel, {
+        gateway.wiredModem.transmit(replyChannel, {
             success = true,
             publicKey = gateway.publicKey
         })
