@@ -141,7 +141,7 @@ function portal.waitForResponse(timeout)
                 local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, portal.sharedSecret)
                 if success then
                     portal.log(decrypted)
-                    local response = textutils.unserialize(decrypted)
+                    local response = textutils.serialize(decrypted)
                     return response
                 else
                     return nil, "Decryption failed"
