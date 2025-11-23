@@ -322,7 +322,6 @@ homeFrame:addLabel()
     :setText("Please swipe your card")
     :setPosition(2, 5)
     :setForeground(colorText)
-    :setFontSize(2)
 
 local statusLabel = homeFrame:addLabel()
     :setText(cardReader and "Ready" or "ERROR: No card reader!")
