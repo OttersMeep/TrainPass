@@ -263,6 +263,9 @@ function serverManager.writeToDisk(machineId, privateKey, machineType, config)
                     configFile.writeLine('    ' .. key .. ' = ' .. value .. ',')
                 elseif type(value) == "boolean" then
                     configFile.writeLine('    ' .. key .. ' = ' .. tostring(value) .. ',')
+                elseif type(value) == "table" then
+                    -- Serialize tables (like gatewayPublicKey)
+                    configFile.writeLine('    ' .. key .. ' = ' .. textutils.serialize(value) .. ',')
                 end
             end
         end
