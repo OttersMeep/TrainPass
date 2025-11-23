@@ -791,7 +791,7 @@ local function cardReaderThread()
 end
 
 -- Start threads
-parallel.waitForAny(
+parallel.waitForAll(
     function()
         basalt.run()
     end,
