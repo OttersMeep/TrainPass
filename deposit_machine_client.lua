@@ -398,7 +398,7 @@ local depositBtn = menuFrame:addButton()
 local withdrawBtn = menuFrame:addButton()
     :setText("Withdraw")
     :setPosition(1, 7)
-    :setSize(termWidth-2), 1)
+    :setSize((termWidth-2), 1)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
