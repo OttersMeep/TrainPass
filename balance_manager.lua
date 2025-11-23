@@ -245,6 +245,30 @@ function balanceManager.chargeVendor(accountId, vendorId, vendorType, amount, me
     return txId, account.balance, nil
 end
 
+function balanceManager.login(username, passwordHash)
+    print("DEBUG [Balance Manager]: Login attempt for " .. tostring(username))
+    
+    local account = balanceManager.getAccountByUsername(username)
+    if not account then
+        return nil, "Account not found"
+    end
+    
+    local storedHash = balanceManager.passwordHashes[account.accountId]
+    
+    -- If no password is set for this account (e.g. old account or different type)
+    if not storedHash then
+        return nil, "Account has no password set"
+    end
+    
+    if storedHash == passwordHash then
+        print("DEBUG [Balance Manager]: Login successful for " .. username)
+        return account, nil
+    else
+        print("DEBUG [Balance Manager]: Invalid password for " .. username)
+        return nil, "Invalid password"
+    end
+end
+
 -- Check if can afford
 function balanceManager.canAfford(accountId, amount)
     local account = balanceManager.getAccount(accountId)
@@ -347,6 +371,14 @@ function balanceManager.handleRequest(message)
             accountId = accountId,
             error = err
         }
+
+    elseif request.action == "LOGIN" then
+        local account, err = balanceManager.login(request.username, request.passwordHash)
+        return {
+            success = account ~= nil,
+            account = account,
+            error = err
+    }
         
     elseif request.action == "GET_ACCOUNT" then
         local account = balanceManager.getAccount(request.accountId)
