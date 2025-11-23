@@ -54,9 +54,17 @@ if fs.exists("machine_config.lua") then
 end
 
 -- Validate configuration
-if atm.config.privateKey == "" then
-    error("Private key not configured! Edit deposit_machine_client.lua or machine_config.lua")
+if not atm.config.privateKey or type(atm.config.privateKey) ~= "table" then
+    error("Private key not configured or invalid! Type: " .. type(atm.config.privateKey))
 end
+
+if not atm.config.gatewayPublicKey or type(atm.config.gatewayPublicKey) ~= "table" then
+    error("Gateway public key not configured or invalid! Type: " .. type(atm.config.gatewayPublicKey))
+end
+
+print("Configuration loaded successfully")
+print("Private key: " .. #atm.config.privateKey .. " bytes")
+print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 
 -- Find inventory (hopper on right)
 local inventory = peripheral.wrap(atm.config.inventorySide)
