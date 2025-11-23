@@ -10,9 +10,8 @@ if not fs.exists("basalt.lua") then
         error("Failed to download Basalt! Please install manually.")
     end
 end
-
-local basalt = require("basalt")
 local ecc = require("ecc")
+local basalt = require("basalt")
 
 local atm = {}
 
