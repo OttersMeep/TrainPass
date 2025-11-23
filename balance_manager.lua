@@ -7,6 +7,7 @@ local balanceManager = {}
 -- Database
 balanceManager.accounts = {}
 balanceManager.cardToAccount = {} -- UUID -> accountId mapping
+balanceManager.passwordHashes = {} -- accountId -> password hash mapping
 balanceManager.accountCounter = 0
 
 -- Wired modem
@@ -46,11 +47,13 @@ function balanceManager.generateAccountId(username)
     return hash:toHex():sub(1, 16)
 end
 
+-- ...existing code...
 -- Create account
-function balanceManager.createAccount(username, publicKey, initialBalance, cardUUIDs)
+function balanceManager.createAccount(username, publicKey, passwordHash, initialBalance, cardUUIDs)
     print("DEBUG [Balance Manager]: createAccount called")
     print("  username: " .. tostring(username))
     print("  publicKey: " .. tostring(publicKey))
+    print("  passwordHash: " .. tostring(passwordHash))
     print("  initialBalance: " .. tostring(initialBalance))
     print("  cardUUIDs: " .. textutils.serialize(cardUUIDs))
     
@@ -72,6 +75,12 @@ function balanceManager.createAccount(username, publicKey, initialBalance, cardU
     
     local accountId = balanceManager.generateAccountId(username)
     print("DEBUG [Balance Manager]: Generated accountId: " .. accountId)
+    
+    -- Store password hash
+    if passwordHash then
+        balanceManager.passwordHashes[accountId] = passwordHash
+        print("DEBUG [Balance Manager]: Password hash stored for account " .. accountId)
+    end
     
     balanceManager.accounts[accountId] = {
         accountId = accountId,
@@ -101,6 +110,7 @@ function balanceManager.createAccount(username, publicKey, initialBalance, cardU
     print("DEBUG [Balance Manager]: Returning accountId: " .. accountId)
     return accountId, nil
 end
+-- ...existing code...
 
 -- Add payment card to account
 function balanceManager.addCard(accountId, cardUUID)
@@ -437,6 +447,7 @@ function balanceManager.save(filename)
     file.write(textutils.serialize({
         accounts = balanceManager.accounts,
         cardToAccount = balanceManager.cardToAccount,
+        passwordHashes = balanceManager.passwordHashes,
         accountCounter = balanceManager.accountCounter
     }))
     file.close()
@@ -457,6 +468,7 @@ function balanceManager.load(filename)
     if data then
         balanceManager.accounts = data.accounts or {}
         balanceManager.cardToAccount = data.cardToAccount or {}
+        balanceManager.passwordHashes = data.passwordHashes or {}
         balanceManager.accountCounter = data.accountCounter or 0
         return true
     end
