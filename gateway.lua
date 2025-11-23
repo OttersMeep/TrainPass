@@ -449,10 +449,10 @@ end
 
 -- Handle CREATE_ACCOUNT request
 function gateway.handleCreateAccount(data, replyChannel)
-    if not data.username or not data.cardUUID then
+    if not data.username then
         gateway.sendWireless(replyChannel, {
             success = false,
-            error = "Missing username or cardUUID"
+            error = "Missing username"
         })
         return
     end
@@ -463,7 +463,7 @@ function gateway.handleCreateAccount(data, replyChannel)
         username = data.username,
         publicKey = nil,  -- Portal accounts don't need public keys
         initialBalance = 0,
-        cardUUIDs = {data.cardUUID}
+        cardUUIDs = {}  -- Empty initially, cards added later
     }
     
     gateway.wiredModem.transmit(

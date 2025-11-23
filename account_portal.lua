@@ -126,14 +126,13 @@ function portal.waitForResponse(timeout)
 end
 
 -- Create account
-function portal.createAccount(username, password, cardUUID)
+function portal.createAccount(username, password)
     local timestamp = os.epoch("utc")
     
     portal.sendRequest({
         data = {
             requestType = "CREATE_ACCOUNT",
             username = username,
-            cardUUID = cardUUID,
             portalId = portal.config.machineId,
             timestamp = timestamp
         },
@@ -277,7 +276,6 @@ local main = basalt.createFrame()
     :initializeState("currentScreen", "home")
     :initializeState("createUsername", "")
     :initializeState("createPassword", "")
-    :initializeState("createCardUUID", nil)
     :initializeState("loginUsername", "")
     :initializeState("loginPassword", "")
     :initializeState("currentUser", nil)
@@ -363,28 +361,16 @@ local createPasswordInput = createFrame:addInput({replaceChar="*"})
     :setForeground(colors.white)
     :bind("text", "createPassword")
 
-createFrame:addLabel()
-    :setText("Swipe a card to register:")
-    :setPosition(2, 10)
-    :setForeground(colorText)
-
-local createCardLabel = createFrame:addLabel()
-    :setText("No card")
-    :setPosition(2, 11)
-    :setForeground(colors.yellow)
-
-local createCardUUID = nil
-
 local createConfirmBtn = createFrame:addButton()
     :setText("Create")
-    :setPosition(2, 13)
+    :setPosition(2, 10)
     :setSize(10, 3)
     :setBackground(colorSuccess)
     :setForeground(colors.white)
 
 local createCancelBtn = createFrame:addButton()
     :setText("Cancel")
-    :setPosition(13, 13)
+    :setPosition(13, 10)
     :setSize(10, 3)
     :setBackground(colorError)
     :setForeground(colors.white)
@@ -566,8 +552,6 @@ local removeCardCancelBtn = removeCardFrame:addButton()
 createAccountBtn:onClick(function()
     main:setState("createUsername", "")
     main:setState("createPassword", "")
-    main:setState("createCardUUID", nil)
-    createCardLabel:setText("No card")
     createStatusLabel:setText("")
     homeFrame:setVisible(false)
     createFrame:setVisible(true)
@@ -588,26 +572,20 @@ end)
 createConfirmBtn:onClick(function()
     local username = main:getState("createUsername")
     local password = main:getState("createPassword")
-    local cardUUID = main:getState("createCardUUID")
     
     if username == "" or password == "" then
         createStatusLabel:setText("Username and password required"):setForeground(colorError)
         return
     end
     
-    if not cardUUID then
-        createStatusLabel:setText("Please swipe a card"):setForeground(colorError)
-        return
-    end
-    
     createStatusLabel:setText("Creating account..."):setForeground(colors.yellow)
     
-    -- Run account creation in a separate thread to not block UI
-    main:addThread():start(function()
-        local success, result = portal.createAccount(username, password, cardUUID)
+    -- Schedule the network operation to run after UI updates
+    main:schedule(function()
+        local success, result = portal.createAccount(username, password)
         if success then
-            createStatusLabel:setText("Account created!"):setForeground(colorSuccess)
-            sleep(2)
+            createStatusLabel:setText("Account created! You can now login."):setForeground(colorSuccess)
+            os.sleep(2)
             createFrame:setVisible(false)
             homeFrame:setVisible(true)
             main:setState("currentScreen", "home")
@@ -636,8 +614,8 @@ loginConfirmBtn:onClick(function()
     
     loginStatusLabel:setText("Logging in..."):setForeground(colors.yellow)
     
-    -- Run login in a separate thread to not block UI
-    main:addThread():start(function()
+    -- Schedule the network operation to run after UI updates
+    main:schedule(function()
         local success, account = portal.login(username, password)
         if success then
             main:setState("currentUser", username)
@@ -712,23 +690,17 @@ local function cardReaderThread()
             if event == "card_read" and info and info.data then
                 local screen = main:getState("currentScreen")
                 
-                if screen == "create" then
-                    -- Register card for new account
-                    main:setState("createCardUUID", info.data)
-                    createCardLabel:setText("Card: " .. info.data:sub(1, 16) .. "..."):setForeground(colorSuccess)
-                    cardReader.beep(1200)
-                    
-                elseif screen == "add_card" then
+                if screen == "add_card" then
                     -- Add card to current account
                     local currentAccount = main:getState("currentAccount")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
                     
-                    main:addThread():start(function()
+                    main:schedule(function()
                         local success, err = portal.addCard(currentAccount.accountId, info.data)
                         if success then
                             addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
                             cardReader.beep(1500)
-                            sleep(2)
+                            os.sleep(2)
                             
                             -- Refresh account info
                             local _, account = portal.getAccountInfo(currentAccount.accountId)
@@ -751,12 +723,12 @@ local function cardReaderThread()
                     local currentAccount = main:getState("currentAccount")
                     removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
                     
-                    main:addThread():start(function()
+                    main:schedule(function()
                         local success, err = portal.removeCard(currentAccount.accountId, info.data)
                         if success then
                             removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
                             cardReader.beep(1500)
-                            sleep(2)
+                            os.sleep(2)
                             
                             -- Refresh account info
                             local _, account = portal.getAccountInfo(currentAccount.accountId)
