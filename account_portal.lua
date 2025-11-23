@@ -725,6 +725,8 @@ local function cardReaderThread()
                         
                         -- Write UUID and username to card
                         local writeSuccess = cardReader.write(newUUID, currentUser)
+                        portal.log(textutils.serialize(writeSuccess))
+                        portal.log(writeSuccess)
                         
                         if not writeSuccess then
                             addCardStatusLabel:setText("Error: Failed to write to card"):setForeground(colorError)
