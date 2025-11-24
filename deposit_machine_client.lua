@@ -325,6 +325,9 @@ else
     main = basalt.createFrame()
 end
 
+-- Initialize state
+main:initializeState("currentScreen", "home")
+
 -- Get terminal size (after setting text scale)
 local termWidth, termHeight
 if monitor then
@@ -339,9 +342,6 @@ local colorPrimary = colors.blue
 local colorSuccess = colors.green
 local colorError = colors.red
 local colorText = colors.white
-
--- Frame visibility tracking
-local currentScreen = "home"  -- "home", "menu", "deposit", "withdraw"
 
 -- Home Screen
 local homeFrame = main:addFrame()
@@ -496,18 +496,17 @@ local withdrawCancelBtn = withdrawFrame:addButton()
 
 -- Check Balance
 checkBalanceBtn:onClick(function(self)
-    print("MEOW")
-    
     menuBalanceLabel:setText("Checking..."):setForeground(colors.yellow)
-    basalt.update()
     
-    local success, balance = atm.checkBalance(atm.currentAccount)
-    if success then
-        atm.currentBalance = balance
-        menuBalanceLabel:setText("Balance: " .. balance):setForeground(colorSuccess)
-    else
-        menuBalanceLabel:setText("Error: " .. balance):setForeground(colorError)
-    end
+    basalt.schedule(function()
+        local success, balance = atm.checkBalance(atm.currentAccount)
+        if success then
+            atm.currentBalance = balance
+            menuBalanceLabel:setText("Balance: " .. balance):setForeground(colorSuccess)
+        else
+            menuBalanceLabel:setText("Error: " .. balance):setForeground(colorError)
+        end
+    end)
 end)
 
 -- Go to deposit screen
@@ -521,7 +520,7 @@ depositBtn:onClick(function()
     
     menuFrame:setVisible(false)
     depositFrame:setVisible(true)
-    currentScreen = "deposit"
+    main:setState("currentScreen", "deposit")
 end)
 
 -- Confirm deposit
@@ -532,23 +531,24 @@ depositConfirmBtn:onClick(function()
     if atm.diamondsInserted == 0 then
         depositFrame:setVisible(false)
         menuFrame:setVisible(true)
-        currentScreen = "menu"
+        main:setState("currentScreen", "menu")
         return
     end
     
     depositCountLabel:setText("Processing..."):setForeground(colors.yellow)
-    basalt.update()
     
-    local success, balance = atm.processDeposit(atm.currentAccount, atm.diamondsInserted)
-    if success then
-        atm.currentBalance = balance
-        menuBalanceLabel:setText("Balance: " .. balance)
-        depositFrame:setVisible(false)
-        menuFrame:setVisible(true)
-        currentScreen = "menu"
-    else
-        depositCountLabel:setText("Error: " .. balance):setForeground(colorError)
-    end
+    basalt.schedule(function()
+        local success, balance = atm.processDeposit(atm.currentAccount, atm.diamondsInserted)
+        if success then
+            atm.currentBalance = balance
+            menuBalanceLabel:setText("Balance: " .. balance)
+            depositFrame:setVisible(false)
+            menuFrame:setVisible(true)
+            main:setState("currentScreen", "menu")
+        else
+            depositCountLabel:setText("Error: " .. balance):setForeground(colorError)
+        end
+    end)
 end)
 
 -- Cancel deposit
@@ -559,7 +559,7 @@ depositCancelBtn:onClick(function()
     atm.diamondsInserted = 0
     depositFrame:setVisible(false)
     menuFrame:setVisible(true)
-    currentScreen = "menu"
+    main:setState("currentScreen", "menu")
 end)
 
 -- Go to withdraw screen
@@ -568,7 +568,7 @@ withdrawBtn:onClick(function()
     withdrawValueLabel:setText("Cost: 0")
     menuFrame:setVisible(false)
     withdrawFrame:setVisible(true)
-    currentScreen = "withdraw"
+    main:setState("currentScreen", "withdraw")
 end)
 
 -- Update withdraw cost
@@ -592,25 +592,26 @@ withdrawConfirmBtn:onClick(function()
     end
     
     withdrawValueLabel:setText("Processing..."):setForeground(colors.yellow)
-    basalt.update()
     
-    local success, balance = atm.processWithdrawal(atm.currentAccount, diamonds)
-    if success then
-        atm.currentBalance = balance
-        menuBalanceLabel:setText("Balance: " .. balance)
-        withdrawFrame:setVisible(false)
-        menuFrame:setVisible(true)
-        currentScreen = "menu"
-    else
-        withdrawValueLabel:setText("Error: " .. balance):setForeground(colorError)
-    end
+    basalt.schedule(function()
+        local success, balance = atm.processWithdrawal(atm.currentAccount, diamonds)
+        if success then
+            atm.currentBalance = balance
+            menuBalanceLabel:setText("Balance: " .. balance)
+            withdrawFrame:setVisible(false)
+            menuFrame:setVisible(true)
+            main:setState("currentScreen", "menu")
+        else
+            withdrawValueLabel:setText("Error: " .. balance):setForeground(colorError)
+        end
+    end)
 end)
 
 -- Cancel withdrawal
 withdrawCancelBtn:onClick(function()
     withdrawFrame:setVisible(false)
     menuFrame:setVisible(true)
-    currentScreen = "menu"
+    main:setState("currentScreen", "menu")
 end)
 
 -- Logout
@@ -620,7 +621,7 @@ logoutBtn:onClick(function()
     statusLabel:setText("Ready"):setForeground(colorSuccess)
     menuFrame:setVisible(false)
     homeFrame:setVisible(true)
-    currentScreen = "home"
+    main:setState("currentScreen", "home")
 end)
 
 -- Helper: Check if item is a diamond
@@ -628,126 +629,123 @@ local function isDiamond(itemName)
     return itemName == "minecraft:diamond"
 end
 
--- Helper: Clear inventory
-local function clearInventory()
-    local size = inventory.size()
-    for slot = 1, size do
-        local item = inventory.getItemDetail(slot)
-        if item then
-            inventory.pushItems(atm.config.dispenserSide, slot)
-        end
-    end
-end
-
--- Diamond detection thread using inventory API
-local function diamondDetectionThread()
-    local depositActive = false
-    local errorMessage = nil
+-- Register custom event for inventory_changed
+basalt.onEvent("inventory_changed", function()
+    local currentScreen = main:getState("currentScreen")
     
-    while true do
-        local wasDepositActive = depositActive
-        depositActive = (currentScreen == "deposit")
-        
-        -- Just entered deposit screen
-        if depositActive and not wasDepositActive then
-            -- Reset state
-            atm.diamondsInserted = 0
-            errorMessage = nil
-            -- Start with hopper unlocked
-            redstone.setOutput(atm.config.inventorySide, false)
+    if currentScreen == "deposit" then
+        -- Check for items in inventory
+        local hasItem = false
+        for slot = 1, inventory.size() do
+            local item = inventory.getItemDetail(slot)
+            if item then
+                hasItem = true
+                break
+            end
         end
         
-        -- Just left deposit screen
-        if not depositActive and wasDepositActive then
-            -- Lock hopper
+        if hasItem then
+            -- Lock hopper while processing
             redstone.setOutput(atm.config.inventorySide, true)
-        end
-        
-        if depositActive then
-            -- Check for items in inventory
-            local hasItem = false
+            
+            -- Check all items
+            local validDiamonds = 0
+            local invalidItems = 0
+            
             for slot = 1, inventory.size() do
                 local item = inventory.getItemDetail(slot)
                 if item then
-                    hasItem = true
-                    break
-                end
-            end
-            
-            if hasItem then
-                -- Lock hopper while processing
-                redstone.setOutput(atm.config.inventorySide, true)
-                
-                -- Check all items
-                local validDiamonds = 0
-                local invalidItems = 0
-                
-                for slot = 1, inventory.size() do
-                    local item = inventory.getItemDetail(slot)
-                    if item then
-                        if isDiamond(item.name) then
-                            validDiamonds = validDiamonds + item.count
-                            -- Remove diamonds from inventory
-                            inventory.pushItems(atm.config.dispenserSide, slot)
-                        else
-                            invalidItems = invalidItems + 1
-                            -- Return invalid item
-                            inventory.pushItems(atm.config.dispenserSide, slot)
-                        end
+                    if isDiamond(item.name) then
+                        validDiamonds = validDiamonds + item.count
+                        -- Remove diamonds from inventory
+                        inventory.pushItems(atm.config.dispenserSide, slot)
+                    else
+                        invalidItems = invalidItems + 1
+                        -- Return invalid item
+                        inventory.pushItems(atm.config.dispenserSide, slot)
                     end
                 end
-                
-                if validDiamonds > 0 then
-                    atm.diamondsInserted = atm.diamondsInserted + validDiamonds
-                    depositCountLabel:setText("Diamonds inserted: " .. atm.diamondsInserted)
-                    depositValueLabel:setText("Value: " .. (atm.diamondsInserted * atm.config.diamondValue))
-                        :setForeground(colors.green)
-                    errorMessage = nil
-                end
-                
-                if invalidItems > 0 then
-                    errorMessage = "Invalid item(s) rejected!"
-                    depositValueLabel:setText(errorMessage)
-                        :setForeground(colors.red)
-                end
-                
-                -- Wait a moment before unlocking again
-                sleep(0.3)
-                
-                -- Unlock hopper for next item
-                redstone.setOutput(atm.config.inventorySide, false)
             end
+            
+            if validDiamonds > 0 then
+                atm.diamondsInserted = atm.diamondsInserted + validDiamonds
+                depositCountLabel:setText("Diamonds inserted: " .. atm.diamondsInserted)
+                depositValueLabel:setText("Value: " .. (atm.diamondsInserted * atm.config.diamondValue))
+                    :setForeground(colors.green)
+            end
+            
+            if invalidItems > 0 then
+                depositValueLabel:setText("Invalid item(s) rejected!")
+                    :setForeground(colors.red)
+            end
+            
+            -- Schedule unlocking the hopper after a short delay
+            basalt.schedule(function()
+                sleep(0.3)
+                -- Only unlock if still on deposit screen
+                if main:getState("currentScreen") == "deposit" then
+                    redstone.setOutput(atm.config.inventorySide, false)
+                end
+            end)
         end
-        
-        sleep(0.05)
     end
-end
+end)
 
--- Card reader thread
-local function cardReaderThread()
+-- Register custom event for card_read
+basalt.onEvent("card_read", function(info)
     if not cardReader then return end
     
-    while true do
-        local success, err = pcall(function()
-            local event, info = os.pullEvent("card_read")
+    if info and info.data then
+        local currentScreen = main:getState("currentScreen")
+        
+        if currentScreen == "home" then
+            -- Beep and light to indicate card read
+            cardReader.beep(1000)
+            cardReader.setLight("YELLOW", true)
+            sleep(0.1)
+            cardReader.setLight("YELLOW", false)
             
-            if event == "card_read" and info and info.data then
-                -- Only process cards on home or menu screen
-                if currentScreen == "home" then
-                    -- Beep and light to indicate card read
-                    cardReader.beep(1000)
-                    cardReader.setLight("YELLOW", true)
+            statusLabel:setText("Reading card..."):setForeground(colors.yellow)
+            
+            basalt.schedule(function()
+                -- Look up account from card UUID
+                local success, accountId = atm.getAccountByCard(info.data)
+                if not success then
+                    statusLabel:setText("Error: " .. tostring(accountId)):setForeground(colorError)
+                    
+                    -- Error beep and light
+                    cardReader.setLight("RED", true)
+                    cardReader.beep(500)
                     sleep(0.1)
-                    cardReader.setLight("YELLOW", false)
+                    cardReader.beep(400)
+                    sleep(0.3)
+                    cardReader.setLight("RED", false)
+                else
+                    statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
                     
-                    statusLabel:setText("Reading card..."):setForeground(colors.yellow)
-                    basalt.update()
-                    
-                    -- Look up account from card UUID
-                    local success, accountId = atm.getAccountByCard(info.data)
-                    if not success then
-                        statusLabel:setText("Error: " .. tostring(accountId)):setForeground(colorError)
-                        basalt.update()
+                    -- Get balance for this account
+                    local balSuccess, balance = atm.checkBalance(accountId)
+                    if balSuccess then
+                        atm.currentAccount = accountId
+                        atm.currentBalance = balance
+                        menuBalanceLabel:setText("Balance: " .. balance)
+                        
+                        -- Write balance to card
+                        cardReader.write(info.data, "Balance: " .. balance)
+                        
+                        -- Success beep and light
+                        cardReader.setLight("GREEN", true)
+                        cardReader.beep(1500)
+                        sleep(0.1)
+                        cardReader.beep(1800)
+                        sleep(0.2)
+                        cardReader.setLight("GREEN", false)
+                        
+                        homeFrame:setVisible(false)
+                        menuFrame:setVisible(true)
+                        main:setState("currentScreen", "menu")
+                    else
+                        statusLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
                         
                         -- Error beep and light
                         cardReader.setLight("RED", true)
@@ -756,71 +754,24 @@ local function cardReaderThread()
                         cardReader.beep(400)
                         sleep(0.3)
                         cardReader.setLight("RED", false)
-                    else
-                        statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
-                        basalt.update()
-                        
-                        -- Get balance for this account
-                        local balSuccess, balance = atm.checkBalance(accountId)
-                        if balSuccess then
-                            atm.currentAccount = accountId
-                            atm.currentBalance = balance
-                            menuBalanceLabel:setText("Balance: " .. balance)
-                            
-                            -- Write balance to card
-                            cardReader.write(info.data, "Balance: " .. balance)
-                            
-                            -- Success beep and light
-                            cardReader.setLight("GREEN", true)
-                            cardReader.beep(1500)
-                            sleep(0.1)
-                            cardReader.beep(1800)
-                            sleep(0.2)
-                            cardReader.setLight("GREEN", false)
-                            
-                            homeFrame:setVisible(false)
-                            menuFrame:setVisible(true)
-                            currentScreen = "menu"
-                            basalt.update()
-                        else
-                            statusLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
-                            
-                            -- Error beep and light
-                            cardReader.setLight("RED", true)
-                            cardReader.beep(500)
-                            sleep(0.1)
-                            cardReader.beep(400)
-                            sleep(0.3)
-                            cardReader.setLight("RED", false)
-                            basalt.update()
-                        end
-                    end
-                elseif currentScreen == "menu" then
-                    -- Update card with current balance (verify card matches current account)
-                    local success, accountId = atm.getAccountByCard(info.data)
-                    if success and accountId == atm.currentAccount then
-                        cardReader.write(info.data, "Balance: " .. atm.currentBalance)
-                        cardReader.beep(1200)
-                        cardReader.setLight("GREEN", true)
-                        sleep(0.1)
-                        cardReader.setLight("GREEN", false)
                     end
                 end
-            end
-        end)
-        
-        if not success then
-            print("Card reader error: " .. tostring(err))
-            statusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+            end)
+        elseif currentScreen == "menu" then
+            -- Update card with current balance (verify card matches current account)
+            basalt.schedule(function()
+                local success, accountId = atm.getAccountByCard(info.data)
+                if success and accountId == atm.currentAccount then
+                    cardReader.write(info.data, "Balance: " .. atm.currentBalance)
+                    cardReader.beep(1200)
+                    cardReader.setLight("GREEN", true)
+                    sleep(0.1)
+                    cardReader.setLight("GREEN", false)
+                end
+            end)
         end
     end
-end
+end)
 
--- Start threads
-parallel.waitForAll(
-    function()
-        basalt.run()
-    end,
-    diamondDetectionThread,
-    cardReaderThread
-)
+-- Start Basalt (it will handle all events automatically)
+basalt.run()
