@@ -719,7 +719,6 @@ local function cardReaderThread()
                     local currentUser = main:getState("currentUser")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
                     
-                    basalt.schedule(function()
                         -- Generate new UUID for the card
                         local newUUID = generateUUID()
                         
@@ -748,7 +747,6 @@ local function cardReaderThread()
                             addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
                             cardReader.beep(500)
                         end
-                    end)
                     
                 elseif screen == "remove_card" then
                     -- Remove card from current account
