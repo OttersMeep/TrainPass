@@ -15,9 +15,6 @@ atm.config = {
     machineId = "DEPOSIT_005",
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
-    sourceBarrelName = "minecraft:barrel_0",  -- Source barrel for deposits (networked)
-    junkChestName = "minecraft:chest_0",  -- Target chest for non-diamond items (networked)
-    diamondDispenserName = "minecraft:dispenser_0",  -- Target dispenser for diamonds (networked)
     monitorSide = "top",  -- Side with monitor (default top, auto-detect if nil)
     gatewayChannel = 1000,
     responseChannel = nil  -- Will be set dynamically
@@ -41,9 +38,6 @@ if fs.exists("machine_config.lua") then
             atm.config.gatewayPublicKey = machineConfig.gatewayPublicKey
         end
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
-        atm.config.sourceBarrelName = machineConfig.sourceBarrelName or atm.config.sourceBarrelName
-        atm.config.junkChestName = machineConfig.junkChestName or atm.config.junkChestName
-        atm.config.diamondDispenserName = machineConfig.diamondDispenserName or atm.config.diamondDispenserName
         atm.config.gatewayChannel = machineConfig.gatewayChannel or atm.config.gatewayChannel
         atm.config.monitorSide = machineConfig.monitorSide or atm.config.monitorSide
     end
@@ -66,26 +60,26 @@ print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 atm.sharedSecret = ecc.exchange(atm.config.privateKey, atm.config.gatewayPublicKey)
 print("Shared secret derived: " .. #atm.sharedSecret .. " bytes")
 
--- Find source barrel (via wired modem network)
-local sourceBarrel = peripheral.wrap(atm.config.sourceBarrelName)
+-- Find source barrel
+local sourceBarrel = peripheral.find("minecraft:barrel")
 if not sourceBarrel then
-    error("No source barrel found with name: " .. atm.config.sourceBarrelName .. "! Check wired modem network.")
+    error("No barrel found! ATM requires a barrel for deposits.")
 end
-print("Source barrel connected: " .. atm.config.sourceBarrelName)
+print("Source barrel detected: " .. peripheral.getName(sourceBarrel))
 
--- Find junk chest (via wired modem network)
-local junkChest = peripheral.wrap(atm.config.junkChestName)
+-- Find junk chest
+local junkChest = peripheral.find("minecraft:chest")
 if not junkChest then
-    error("No junk chest found with name: " .. atm.config.junkChestName .. "! Check wired modem network.")
+    error("No chest found! ATM requires a chest for junk items.")
 end
-print("Junk chest connected: " .. atm.config.junkChestName)
+print("Junk chest detected: " .. peripheral.getName(junkChest))
 
--- Find diamond dispenser (via wired modem network)
-local diamondDispenser = peripheral.wrap(atm.config.diamondDispenserName)
+-- Find diamond dispenser
+local diamondDispenser = peripheral.find("minecraft:dispenser")
 if not diamondDispenser then
-    error("No diamond dispenser found with name: " .. atm.config.diamondDispenserName .. "! Check wired modem network.")
+    error("No dispenser found! ATM requires a dispenser for diamonds.")
 end
-print("Diamond dispenser connected: " .. atm.config.diamondDispenserName)
+print("Diamond dispenser detected: " .. peripheral.getName(diamondDispenser))
 
 -- Find monitor
 local monitor = nil
@@ -336,11 +330,11 @@ local function processBarrelItems()
         if item then
             if isDiamond(item.name) then
                 -- Move diamonds to dispenser
-                local moved = sourceBarrel.pushItems(atm.config.diamondDispenserName, slot)
+                local moved = sourceBarrel.pushItems(peripheral.getName(diamondDispenser), slot)
                 diamondCount = diamondCount + moved
             else
                 -- Move junk to junk chest
-                local moved = sourceBarrel.pushItems(atm.config.junkChestName, slot)
+                local moved = sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
                 junkCount = junkCount + moved
             end
         end
@@ -354,7 +348,7 @@ local function clearBarrel()
     for slot = 1, sourceBarrel.size() do
         local item = sourceBarrel.getItemDetail(slot)
         if item then
-            sourceBarrel.pushItems(atm.config.junkChestName, slot)
+            sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
         end
     end
 end
