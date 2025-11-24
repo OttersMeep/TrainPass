@@ -223,6 +223,7 @@ end
 
 -- Add card to account
 function portal.addCard(accountId, cardUUID, nickname)
+    portal.log(nickname)
     local timestamp = os.epoch("utc")
     
     portal.sendRequest({
@@ -716,6 +717,7 @@ addCardStartBtn:onClick(function()
         addCardStatusLabel:setText("Nickname required!"):setForeground(colorError)
         return
     end
+    portal.log(nickname)
 
     addCardStartBtn:setVisible(false)
     addCardStatusLabel:setText("Preparing card..."):setForeground(colors.yellow)
