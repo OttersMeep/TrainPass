@@ -717,7 +717,7 @@ addCardStartBtn:onClick(function()
         return
     end
 
-    addCardStartBtn:hide()
+    addCardStartBtn:setVisible(false)
     addCardStatusLabel:setText("Preparing card..."):setForeground(colors.yellow)
     main:setState("currentScreen", "add_card_wait")
     
