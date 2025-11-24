@@ -311,7 +311,10 @@ local function countDiamondsInBarrel()
     
     for slot = 1, sourceBarrel.size() do
         local item = sourceBarrel.getItemDetail(slot)
-        if item and isDiamond(item.name) then
+        if not item then
+            break -- Optimization: Hopper fills sequentially, so empty slot means end of items
+        end
+        if isDiamond(item.name) then
             totalDiamonds = totalDiamonds + item.count
         end
     end
@@ -327,16 +330,18 @@ local function processBarrelItems()
     -- Go through each slot in source barrel
     for slot = 1, sourceBarrel.size() do
         local item = sourceBarrel.getItemDetail(slot)
-        if item then
-            if isDiamond(item.name) then
-                -- Move diamonds to dispenser
-                local moved = sourceBarrel.pushItems(peripheral.getName(diamondDispenser), slot)
-                diamondCount = diamondCount + moved
-            else
-                -- Move junk to junk chest
-                local moved = sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
-                junkCount = junkCount + moved
-            end
+        if not item then
+            break -- Optimization: Hopper fills sequentially
+        end
+        
+        if isDiamond(item.name) then
+            -- Move diamonds to dispenser
+            local moved = sourceBarrel.pushItems(peripheral.getName(diamondDispenser), slot)
+            diamondCount = diamondCount + moved
+        else
+            -- Move junk to junk chest
+            local moved = sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
+            junkCount = junkCount + moved
         end
     end
     
@@ -347,9 +352,10 @@ end
 local function clearBarrel()
     for slot = 1, sourceBarrel.size() do
         local item = sourceBarrel.getItemDetail(slot)
-        if item then
-            sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
+        if not item then
+            break -- Optimization: Hopper fills sequentially
         end
+        sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
     end
 end
 
