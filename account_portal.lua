@@ -307,6 +307,7 @@ local main = basalt.createFrame()
     :initializeState("waitingForCardClick", nil)
     :initializeState("pendingCardUUID", nil)
     :initializeState("cardNickname", "")
+    :initializeState("selectedCardUUID", nil)
 
 local termWidth, termHeight = term.getSize()
 
