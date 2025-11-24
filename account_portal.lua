@@ -303,6 +303,7 @@ local main = basalt.createFrame()
     :initializeState("loginPassword", "")
     :initializeState("currentUser", nil)
     :initializeState("currentAccount", nil)
+    :initializeState("waitingForCardWrite", false)
 
 local termWidth, termHeight = term.getSize()
 
@@ -671,6 +672,7 @@ addCardBtn:onClick(function()
     menuFrame:setVisible(false)
     addCardFrame:setVisible(true)
     main:setState("currentScreen", "add_card")
+    main:setState("waitingForCardWrite", false)
 end)
 
 -- Go to remove card screen
@@ -686,6 +688,7 @@ addCardCancelBtn:onClick(function()
     addCardFrame:setVisible(false)
     menuFrame:setVisible(true)
     main:setState("currentScreen", "menu")
+    main:setState("waitingForCardWrite", false)
 end)
 
 -- Remove card cancel
@@ -704,93 +707,108 @@ menuLogoutBtn:onClick(function()
     main:setState("currentScreen", "home")
 end)
 
--- Card reader thread
-local function cardReaderThread()
-    while true do
-        local success, err = pcall(function()
-            local event, info = os.pullEvent("card_read")
-            
-            if event == "card_read" and info and info.data then
-                local screen = main:getState("currentScreen")
-                
-                if screen == "add_card" then
-                    portal.log("About to write")                    
-                        -- Generate new UUID for the card
-                    local newUUID = generateUUID()
-                    portal.log("Generated UUID")    
-                        -- Write UUID and username to card
-                    local currentUser = main:getState("currentUser")
-                    cardReader.write(newUUID, currentUser)
-                    portal.log("Wrote to card reader")
-                    -- Add card to current account
-                    local currentAccount = main:getState("currentAccount")
-                    addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
-
-                        os.pullEvent("card_click")
-                        
-                        
-                        -- Add card to account with new UUID
-                        local success, err = portal.addCard(currentAccount.accountId, newUUID)
-                        if success then
-                            addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
-                            cardReader.beep(1500)
-                            
-                            -- Refresh account info
-                            local _, account = portal.getAccountInfo(currentAccount.accountId)
-                            if account then
-                                main:setState("currentAccount", account)
-                                menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
-                            end
-                            
-                            addCardFrame:setVisible(false)
-                            menuFrame:setVisible(true)
-                            main:setState("currentScreen", "menu")
-                        else
-                            addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-                            cardReader.beep(500)
-                        end
-                    
-                elseif screen == "remove_card" then
-                    -- Remove card from current account
-                    local currentAccount = main:getState("currentAccount")
-                    removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
-                    
-                    basalt.schedule(function()
-                        local success, err = portal.removeCard(currentAccount.accountId, info.data)
-                        if success then
-                            removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
-                            cardReader.beep(1500)
-                            os.sleep(2)
-                            
-                            -- Refresh account info
-                            local _, account = portal.getAccountInfo(currentAccount.accountId)
-                            if account then
-                                main:setState("currentAccount", account)
-                                menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
-                            end
-                            
-                            removeCardFrame:setVisible(false)
-                            menuFrame:setVisible(true)
-                            main:setState("currentScreen", "menu")
-                        else
-                            removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-                            cardReader.beep(500)
-                        end
-                    end)
-                end
-            end
-        end)
+-- Handle card_read events using Basalt's event system
+main:onEvent(function(event, ...)
+    if event == "card_read" then
+        local info = ...
         
-        if not success then
-            print("Card reader error: " .. tostring(err))
+        if info and info.data then
+            local screen = main:getState("currentScreen")
+            
+            if screen == "add_card" and not main:getState("waitingForCardWrite") then
+                portal.log("Card read - starting write")
+                main:setState("waitingForCardWrite", true)
+                
+                -- Generate new UUID for the card
+                local newUUID = generateUUID()
+                local currentUser = main:getState("currentUser")
+                
+                portal.log("Generated UUID: " .. newUUID)
+                addCardStatusLabel:setText("Writing to card..."):setForeground(colors.yellow)
+                
+                -- Write UUID and username to card
+                cardReader.write(newUUID, currentUser)
+                portal.log("Write initiated")
+                
+            elseif screen == "remove_card" then
+                -- Remove card from current account
+                local currentAccount = main:getState("currentAccount")
+                removeCardStatusLabel:setText("Removing card..."):setForeground(colors.yellow)
+                
+                basalt.schedule(function()
+                    local success, err = portal.removeCard(currentAccount.accountId, info.data)
+                    if success then
+                        removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
+                        cardReader.beep(1500)
+                        os.sleep(2)
+                        
+                        -- Refresh account info
+                        local _, account = portal.getAccountInfo(currentAccount.accountId)
+                        if account then
+                            main:setState("currentAccount", account)
+                            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                        end
+                        
+                        removeCardFrame:setVisible(false)
+                        menuFrame:setVisible(true)
+                        main:setState("currentScreen", "menu")
+                    else
+                        removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+                        cardReader.beep(500)
+                    end
+                end)
+            end
+        end
+    elseif event == "card_click" then
+        local screen = main:getState("currentScreen")
+        
+        if screen == "add_card" and main:getState("waitingForCardWrite") then
+            portal.log("Card click - completing write")
+            addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
+            
+            -- Schedule the network operation
+            basalt.schedule(function()
+                local currentAccount = main:getState("currentAccount")
+                
+                -- Read the card to get the new UUID
+                local cardData = cardReader.read()
+                if cardData and cardData.data then
+                    local newUUID = cardData.data
+                    
+                    portal.log("Adding card with UUID: " .. newUUID)
+                    local success, err = portal.addCard(currentAccount.accountId, newUUID)
+                    
+                    if success then
+                        addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
+                        cardReader.beep(1500)
+                        os.sleep(2)
+                        
+                        -- Refresh account info
+                        local _, account = portal.getAccountInfo(currentAccount.accountId)
+                        if account then
+                            main:setState("currentAccount", account)
+                            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+                        end
+                        
+                        addCardFrame:setVisible(false)
+                        menuFrame:setVisible(true)
+                        main:setState("currentScreen", "menu")
+                    else
+                        addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+                        cardReader.beep(500)
+                    end
+                else
+                    addCardStatusLabel:setText("Error: Could not read card"):setForeground(colorError)
+                    cardReader.beep(500)
+                end
+                
+                main:setState("waitingForCardWrite", false)
+            end)
         end
     end
-end
+    
+    return false  -- Let other handlers process the event too
+end)
 
--- Start threads
-parallel.waitForAll(
-    function()
-        basalt.run()
-    end,
-    cardReaderThread
-)
+-- Start Basalt (single thread)
+basalt.autoUpdate()
