@@ -590,9 +590,9 @@ local cardList = removeCardFrame:addList()
 
 local removeSelectedBtn = removeCardFrame:addButton()
     :setText("Remove Selected")
-    :setPosition(2, termHeight - 3)
+    :setPosition(2, termHeight-4)
     :setSize(17, 3)
-    :setBackground(colorError)
+    :setBackground(colors.red)
     :setForeground(colors.white)
     :setVisible(false)
 
@@ -752,7 +752,7 @@ end)
 -- Go to remove card screen
 removeCardBtn:onClick(function()
     removeCardStatusLabel:setText("Loading cards..."):setForeground(colors.yellow)
-    removeSelectedBtn:setVisible(false)
+    removeSelectedBtn:setVisible(true)
     main:setState("selectedCardUUID", nil)
     
     menuFrame:setVisible(false)
@@ -779,10 +779,26 @@ removeCardBtn:onClick(function()
 end)
 
 -- Handle card list selection
-cardList:onChange(function(self, item)
+cardList:onSelect(function(item, index)
+    portal.log("Select Call 1")
     if not item then return end
-    local uuid = item.args[1]
+    portal.log("Selected Something")
+    local account = main:getState("currentAccount")
+    local uuid = nil
+    
+    -- Use the list index to retrieve the UUID directly from the account data
+    -- This ensures we get the correct UUID corresponding to the list position
+    if account then
+        if account.cards and account.cards[index] then
+            uuid = account.cards[index].uuid
+        elseif account.cardUUIDs and account.cardUUIDs[index] then
+            -- Legacy support
+            uuid = account.cardUUIDs[index]
+        end
+    end
+
     if uuid then
+        portal.log("UUID IS: " .. uuid)
         main:setState("selectedCardUUID", uuid)
         removeSelectedBtn:setVisible(true)
         removeCardStatusLabel:setText("Selected: " .. string.sub(uuid, 1, 8) .. "...")
@@ -792,6 +808,7 @@ end)
 -- Handle remove button click
 removeSelectedBtn:onClick(function()
     local uuidToRemove = main:getState("selectedCardUUID")
+    portal.log(uuidToRemove)
     if not uuidToRemove then return end
 
     removeCardStatusLabel:setText("Removing..."):setForeground(colors.yellow)
