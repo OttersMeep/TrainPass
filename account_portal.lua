@@ -303,6 +303,8 @@ local main = basalt.createFrame()
     :initializeState("loginPassword", "")
     :initializeState("currentUser", nil)
     :initializeState("currentAccount", nil)
+    :initializeState("waitingForCardClick", nil)
+    :initializeState("pendingCardUUID", nil)
 
 local termWidth, termHeight = term.getSize()
 
