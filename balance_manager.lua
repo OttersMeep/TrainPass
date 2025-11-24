@@ -431,6 +431,7 @@ function balanceManager.handleRequest(message)
         
     elseif request.action == "ADD_CARD" then
         local success, err = balanceManager.addCard(request.accountId, request.cardUUID, request.nickname)
+        print(request.nickname)
         return {
             success = success,
             error = err
