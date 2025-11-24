@@ -674,7 +674,15 @@ loginConfirmBtn:onClick(function()
             -- Update menu
             menuUsernameLabel:setText("User: " .. username)
             menuBalanceLabel:setText("Balance: " .. account.balance)
-            menuCardsLabel:setText("Cards: " .. #account.cardUUIDs)
+            
+            -- FIX: Handle both new 'cards' structure and legacy 'cardUUIDs'
+            local cardCount = 0
+            if account.cards then
+                cardCount = #account.cards
+            elseif account.cardUUIDs then
+                cardCount = #account.cardUUIDs
+            end
+            menuCardsLabel:setText("Cards: " .. cardCount)
             
             loginFrame:setVisible(false)
             menuFrame:setVisible(true)
