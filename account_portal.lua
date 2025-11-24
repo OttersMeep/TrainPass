@@ -583,13 +583,21 @@ removeCardFrame:addLabel()
 
 local cardList = removeCardFrame:addList()
     :setPosition(2, 5)
-    :setSize(termWidth - 4, termHeight - 8)
+    :setSize(termWidth - 4, termHeight - 9) -- Reduced height to fit button
     :setBackground(colors.black)
     :setForeground(colors.white)
 
+local removeSelectedBtn = removeCardFrame:addButton()
+    :setText("Remove Selected")
+    :setPosition(2, termHeight - 3)
+    :setSize(17, 3)
+    :setBackground(colorError)
+    :setForeground(colors.white)
+    :hide()
+
 local removeCardStatusLabel = removeCardFrame:addLabel()
     :setText("")
-    :setPosition(2, termHeight - 2)
+    :setPosition(20, termHeight - 2)
     :setForeground(colors.yellow)
 
 local removeCardBackBtn = removeCardFrame:addButton()
@@ -743,6 +751,9 @@ end)
 -- Go to remove card screen
 removeCardBtn:onClick(function()
     removeCardStatusLabel:setText("Loading cards..."):setForeground(colors.yellow)
+    removeSelectedBtn:hide()
+    main:setState("selectedCardUUID", nil)
+    
     menuFrame:setVisible(false)
     removeCardFrame:setVisible(true)
     main:setState("currentScreen", "remove_card")
@@ -760,19 +771,30 @@ removeCardBtn:onClick(function()
     elseif account.cardUUIDs then
         -- Legacy support
         for _, uuid in pairs(account.cardUUIDs) do
-            cardList:addItem("Card (" .. string.sub(uuid, 1, 8) .. "...)")
+            cardList:addItem("Card (" .. string.sub(uuid, 1, 8) .. "...)", nil, uuid)
         end
     end
     removeCardStatusLabel:setText("")
 end)
 
--- Handle card list selection for removal
+-- Handle card list selection
 cardList:onChange(function(self, item)
     if not item then return end
-    local uuidToRemove = item.args[1] -- We stored UUID in args
-    if not uuidToRemove then return end -- Legacy list item might not have args set up right if not careful
+    local uuid = item.args[1]
+    if uuid then
+        main:setState("selectedCardUUID", uuid)
+        removeSelectedBtn:show()
+        removeCardStatusLabel:setText("Selected: " .. string.sub(uuid, 1, 8) .. "...")
+    end
+end)
+
+-- Handle remove button click
+removeSelectedBtn:onClick(function()
+    local uuidToRemove = main:getState("selectedCardUUID")
+    if not uuidToRemove then return end
 
     removeCardStatusLabel:setText("Removing..."):setForeground(colors.yellow)
+    removeSelectedBtn:hide()
     
     basalt.schedule(function()
         local currentAccount = main:getState("currentAccount")
@@ -788,15 +810,22 @@ cardList:onChange(function(self, item)
                 main:setState("currentAccount", account)
                 -- Refresh list
                 cardList:clear()
+                main:setState("selectedCardUUID", nil)
+                
                 if account.cards then
                     for _, card in pairs(account.cards) do
                         local label = (card.nickname or "Unknown") .. " (" .. string.sub(card.uuid, 1, 8) .. "...)"
                         cardList:addItem(label, nil, card.uuid)
                     end
                 end
+                
+                -- Update menu label count
+                local cardCount = account.cards and #account.cards or (account.cardUUIDs and #account.cardUUIDs or 0)
+                menuCardsLabel:setText("Cards: " .. cardCount)
             end
         else
             removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
+            removeSelectedBtn:show()
         end
     end)
 end)
