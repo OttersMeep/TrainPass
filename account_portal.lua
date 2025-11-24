@@ -724,7 +724,7 @@ local function cardReaderThread()
                         local newUUID = generateUUID()
                         
                         -- Write UUID and username to card
-                        cardReader.write(newUUID, currentUser
+                        cardReader.write(newUUID, currentUser)
                         os.pullEvent("card_click")
                         
                         
