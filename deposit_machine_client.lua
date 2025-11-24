@@ -15,7 +15,9 @@ atm.config = {
     machineId = "DEPOSIT_005",
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
-    dispenserSide = "back",  -- Side to pulse for dispensing diamonds
+    sourceBarrelName = "minecraft:barrel_0",  -- Source barrel for deposits (networked)
+    junkChestName = "minecraft:chest_0",  -- Target chest for non-diamond items (networked)
+    diamondDispenserName = "minecraft:dispenser_0",  -- Target dispenser for diamonds (networked)
     monitorSide = "top",  -- Side with monitor (default top, auto-detect if nil)
     gatewayChannel = 1000,
     responseChannel = nil  -- Will be set dynamically
@@ -39,7 +41,9 @@ if fs.exists("machine_config.lua") then
             atm.config.gatewayPublicKey = machineConfig.gatewayPublicKey
         end
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
-        atm.config.dispenserSide = machineConfig.dispenserSide or atm.config.dispenserSide
+        atm.config.sourceBarrelName = machineConfig.sourceBarrelName or atm.config.sourceBarrelName
+        atm.config.junkChestName = machineConfig.junkChestName or atm.config.junkChestName
+        atm.config.diamondDispenserName = machineConfig.diamondDispenserName or atm.config.diamondDispenserName
         atm.config.gatewayChannel = machineConfig.gatewayChannel or atm.config.gatewayChannel
         atm.config.monitorSide = machineConfig.monitorSide or atm.config.monitorSide
     end
@@ -62,13 +66,26 @@ print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 atm.sharedSecret = ecc.exchange(atm.config.privateKey, atm.config.gatewayPublicKey)
 print("Shared secret derived: " .. #atm.sharedSecret .. " bytes")
 
--- Find deposit barrel
-local depositBarrel = peripheral.find("barrel")
-if not depositBarrel then
-    error("No barrel found! ATM requires a barrel for diamond collection.")
+-- Find source barrel (via wired modem network)
+local sourceBarrel = peripheral.wrap(atm.config.sourceBarrelName)
+if not sourceBarrel then
+    error("No source barrel found with name: " .. atm.config.sourceBarrelName .. "! Check wired modem network.")
 end
+print("Source barrel connected: " .. atm.config.sourceBarrelName)
 
-print("Deposit barrel detected: " .. peripheral.getName(depositBarrel))
+-- Find junk chest (via wired modem network)
+local junkChest = peripheral.wrap(atm.config.junkChestName)
+if not junkChest then
+    error("No junk chest found with name: " .. atm.config.junkChestName .. "! Check wired modem network.")
+end
+print("Junk chest connected: " .. atm.config.junkChestName)
+
+-- Find diamond dispenser (via wired modem network)
+local diamondDispenser = peripheral.wrap(atm.config.diamondDispenserName)
+if not diamondDispenser then
+    error("No diamond dispenser found with name: " .. atm.config.diamondDispenserName .. "! Check wired modem network.")
+end
+print("Diamond dispenser connected: " .. atm.config.diamondDispenserName)
 
 -- Find monitor
 local monitor = nil
@@ -259,13 +276,6 @@ function atm.processDeposit(accountId, diamonds)
     end
 end
 
--- Dispense diamond
-function atm.dispenseDiamond()
-    redstone.setOutput(atm.config.dispenserSide, true)
-    sleep(0.1)
-    redstone.setOutput(atm.config.dispenserSide, false)
-end
-
 -- Process withdrawal
 function atm.processWithdrawal(accountId, diamonds)
     local amount = diamonds * atm.config.diamondValue
@@ -289,11 +299,7 @@ function atm.processWithdrawal(accountId, diamonds)
     
     local response, err = atm.waitForResponse(10)
     if response and response.success then
-        -- Dispense diamonds
-        for i = 1, diamonds do
-            atm.dispenseDiamond()
-            sleep(0.3)
-        end
+        -- Pull diamonds from dispenser (they should already be there)
         return true, response.balance
     else
         return false, response and response.error or err
@@ -305,12 +311,12 @@ local function isDiamond(itemName)
     return itemName == "minecraft:diamond"
 end
 
--- Helper: Count diamonds in barrel
+-- Helper: Count diamonds in source barrel
 local function countDiamondsInBarrel()
     local totalDiamonds = 0
     
-    for slot = 1, depositBarrel.size() do
-        local item = depositBarrel.getItemDetail(slot)
+    for slot = 1, sourceBarrel.size() do
+        local item = sourceBarrel.getItemDetail(slot)
         if item and isDiamond(item.name) then
             totalDiamonds = totalDiamonds + item.count
         end
@@ -319,13 +325,36 @@ local function countDiamondsInBarrel()
     return totalDiamonds
 end
 
--- Helper: Clear barrel (remove all items)
-local function clearBarrel()
-    for slot = 1, depositBarrel.size() do
-        local item = depositBarrel.getItemDetail(slot)
+-- Helper: Process items in source barrel (sort diamonds from junk)
+local function processBarrelItems()
+    local diamondCount = 0
+    local junkCount = 0
+    
+    -- Go through each slot in source barrel
+    for slot = 1, sourceBarrel.size() do
+        local item = sourceBarrel.getItemDetail(slot)
         if item then
-            -- Push items out (to void or another storage)
-            depositBarrel.pushItems(atm.config.dispenserSide, slot)
+            if isDiamond(item.name) then
+                -- Move diamonds to dispenser
+                local moved = sourceBarrel.pushItems(atm.config.diamondDispenserName, slot)
+                diamondCount = diamondCount + moved
+            else
+                -- Move junk to junk chest
+                local moved = sourceBarrel.pushItems(atm.config.junkChestName, slot)
+                junkCount = junkCount + moved
+            end
+        end
+    end
+    
+    return diamondCount, junkCount
+end
+
+-- Helper: Clear source barrel (return all items to junk chest)
+local function clearBarrel()
+    for slot = 1, sourceBarrel.size() do
+        local item = sourceBarrel.getItemDetail(slot)
+        if item then
+            sourceBarrel.pushItems(atm.config.junkChestName, slot)
         end
     end
 end
@@ -447,7 +476,7 @@ depositFrame:addLabel()
     :setForeground(colorPrimary)
 
 depositFrame:addLabel()
-    :setText("Insert diamonds to load balance")
+    :setText("Insert diamonds into barrel")
     :setPosition(2, 4)
     :setForeground(colorText)
 
@@ -564,26 +593,34 @@ depositConfirmBtn:onClick(function()
         barrelMonitorTimer = nil
     end
     
-    -- Count final diamonds in barrel
-    local finalDiamonds = countDiamondsInBarrel()
-    
-    if finalDiamonds == 0 then
-        depositFrame:setVisible(false)
-        menuFrame:setVisible(true)
-        main:setState("currentScreen", "menu")
-        return
-    end
-    
-    depositCountLabel:setText("Processing..."):setForeground(colors.yellow)
+    depositCountLabel:setText("Processing items..."):setForeground(colors.yellow)
     
     basalt.schedule(function()
-        local success, balance = atm.processDeposit(atm.currentAccount, finalDiamonds)
+        -- Process items (move diamonds to dispenser, junk to chest)
+        local diamonds, junk = processBarrelItems()
+        
+        if junk > 0 then
+            depositValueLabel:setText(junk .. " junk item(s) rejected"):setForeground(colorError)
+            sleep(2)
+        end
+        
+        if diamonds == 0 then
+            depositCountLabel:setText("No diamonds to deposit"):setForeground(colorError)
+            sleep(2)
+            depositFrame:setVisible(false)
+            menuFrame:setVisible(true)
+            main:setState("currentScreen", "menu")
+            return
+        end
+        
+        depositCountLabel:setText("Depositing " .. diamonds .. " diamonds..."):setForeground(colors.yellow)
+        
+        local success, balance = atm.processDeposit(atm.currentAccount, diamonds)
         if success then
             atm.currentBalance = balance
             menuBalanceLabel:setText("Balance: " .. balance)
-            
-            -- Clear barrel after successful deposit
-            clearBarrel()
+            depositCountLabel:setText("Deposit successful!"):setForeground(colorSuccess)
+            sleep(2)
             
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
@@ -603,13 +640,8 @@ depositCancelBtn:onClick(function()
         barrelMonitorTimer = nil
     end
     
-    -- Return items from barrel (push back to dispenser)
-    for slot = 1, depositBarrel.size() do
-        local item = depositBarrel.getItemDetail(slot)
-        if item then
-            depositBarrel.pushItems(atm.config.dispenserSide, slot)
-        end
-    end
+    -- Return all items from barrel to junk chest
+    clearBarrel()
     
     atm.diamondsInserted = 0
     depositFrame:setVisible(false)
@@ -653,6 +685,11 @@ withdrawConfirmBtn:onClick(function()
         if success then
             atm.currentBalance = balance
             menuBalanceLabel:setText("Balance: " .. balance)
+            
+            -- Note: Diamonds should be dispensed by the dispenser block automatically
+            withdrawValueLabel:setText("Collect your diamonds!"):setForeground(colorSuccess)
+            sleep(2)
+            
             withdrawFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
@@ -689,7 +726,7 @@ basalt.onEvent("timer", function(timerId)
             local diamonds = countDiamondsInBarrel()
             
             -- Update display
-            depositCountLabel:setText("Diamonds inserted: " .. diamonds)
+            depositCountLabel:setText("Diamonds in barrel: " .. diamonds)
             depositValueLabel:setText("Value: " .. (diamonds * atm.config.diamondValue))
                 :setForeground(diamonds > 0 and colors.green or colorText)
             
