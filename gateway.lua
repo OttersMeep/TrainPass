@@ -440,7 +440,7 @@ function gateway.handleAddCard(data, replyChannel, machineId)
         return
     end
     
-    local request = { action = "ADD_CARD", accountId = data.accountId, cardUUID = data.cardUUID }
+    local request = { action = "ADD_CARD", accountId = data.accountId, cardUUID = data.cardUUID, name = data.name }
     local response = gateway.sendToBalanceManager(request)
     
     if response then
