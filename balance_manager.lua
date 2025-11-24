@@ -542,6 +542,7 @@ end
 function balanceManager.run()
     print("Balance Manager running...")
     balanceManager.load()
+    balanceManager.save()
     
     local lastSave = os.epoch("utc")
     
