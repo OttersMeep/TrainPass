@@ -87,7 +87,7 @@ function balanceManager.createAccount(username, publicKey, passwordHash, initial
         username = username,
         publicKey = publicKey,
         balance = initialBalance,
-        cardUUIDs = cardUUIDs, -- List of valid payment card UUIDs
+        cards = {}, -- Changed from cardUUIDs to cards (list of objects)
         createdAt = os.epoch("utc"),
         active = true
     }
@@ -95,7 +95,11 @@ function balanceManager.createAccount(username, publicKey, passwordHash, initial
     print("DEBUG [Balance Manager]: Account created in memory")
     
     -- Register card UUIDs
-    for _, uuid in ipairs(cardUUIDs) do
+    for i, uuid in ipairs(cardUUIDs) do
+        table.insert(balanceManager.accounts[accountId].cards, {
+            uuid = uuid,
+            nickname = "Card " .. i
+        })
         balanceManager.cardToAccount[uuid] = accountId
     end
     
@@ -113,7 +117,7 @@ end
 -- ...existing code...
 
 -- Add payment card to account
-function balanceManager.addCard(accountId, cardUUID)
+function balanceManager.addCard(accountId, cardUUID, nickname)
     local account = balanceManager.accounts[accountId]
     if not account then
         return false, "Account not found"
@@ -124,7 +128,21 @@ function balanceManager.addCard(accountId, cardUUID)
         return false, "Card already registered to another account"
     end
     
-    table.insert(account.cardUUIDs, cardUUID)
+    -- Migrate legacy cardUUIDs to cards structure if needed
+    if not account.cards then
+        account.cards = {}
+        if account.cardUUIDs then
+            for i, uuid in ipairs(account.cardUUIDs) do
+                table.insert(account.cards, { uuid = uuid, nickname = "Card " .. i })
+            end
+            account.cardUUIDs = nil -- Clear legacy data
+        end
+    end
+    
+    table.insert(account.cards, {
+        uuid = cardUUID,
+        nickname = nickname or "New Card"
+    })
     balanceManager.cardToAccount[cardUUID] = accountId
     
     return true, nil
@@ -137,10 +155,21 @@ function balanceManager.removeCard(accountId, cardUUID)
         return false, "Account not found"
     end
     
+    -- Migrate legacy cardUUIDs to cards structure if needed
+    if not account.cards then
+        account.cards = {}
+        if account.cardUUIDs then
+            for i, uuid in ipairs(account.cardUUIDs) do
+                table.insert(account.cards, { uuid = uuid, nickname = "Card " .. i })
+            end
+            account.cardUUIDs = nil
+        end
+    end
+    
     -- Remove from account
-    for i, uuid in ipairs(account.cardUUIDs) do
-        if uuid == cardUUID then
-            table.remove(account.cardUUIDs, i)
+    for i, card in ipairs(account.cards) do
+        if card.uuid == cardUUID then
+            table.remove(account.cards, i)
             break
         end
     end
@@ -401,7 +430,7 @@ function balanceManager.handleRequest(message)
         }
         
     elseif request.action == "ADD_CARD" then
-        local success, err = balanceManager.addCard(request.accountId, request.cardUUID)
+        local success, err = balanceManager.addCard(request.accountId, request.cardUUID, request.nickname)
         return {
             success = success,
             error = err
