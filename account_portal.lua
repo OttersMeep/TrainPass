@@ -714,10 +714,10 @@ local function cardReaderThread()
                 local screen = main:getState("currentScreen")
                 
                 if screen == "add_card" then
-                                        
+                    portal.log("About to write")                    
                         -- Generate new UUID for the card
                     local newUUID = generateUUID()
-                        
+                    portal.log("Generated UUID")    
                         -- Write UUID and username to card
                     local currentUser = main:getState("currentUser")
                     cardReader.write(newUUID, currentUser)
