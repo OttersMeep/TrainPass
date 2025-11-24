@@ -16,7 +16,6 @@ atm.config = {
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
     dispenserSide = "back",  -- Side to pulse for dispensing diamonds
-    inventorySide = "right",  -- Side with hopper for diamond detection (also receives lock signal)
     monitorSide = "top",  -- Side with monitor (default top, auto-detect if nil)
     gatewayChannel = 1000,
     responseChannel = nil  -- Will be set dynamically
@@ -41,7 +40,6 @@ if fs.exists("machine_config.lua") then
         end
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
         atm.config.dispenserSide = machineConfig.dispenserSide or atm.config.dispenserSide
-        atm.config.inventorySide = machineConfig.inventorySide or atm.config.inventorySide
         atm.config.gatewayChannel = machineConfig.gatewayChannel or atm.config.gatewayChannel
         atm.config.monitorSide = machineConfig.monitorSide or atm.config.monitorSide
     end
@@ -64,13 +62,13 @@ print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 atm.sharedSecret = ecc.exchange(atm.config.privateKey, atm.config.gatewayPublicKey)
 print("Shared secret derived: " .. #atm.sharedSecret .. " bytes")
 
--- Find inventory (hopper on right)
-local inventory = peripheral.wrap(atm.config.inventorySide)
-if not inventory then
-    error("No inventory found on " .. atm.config.inventorySide .. " side! Need hopper for diamond detection.")
+-- Find deposit barrel
+local depositBarrel = peripheral.find("barrel")
+if not depositBarrel then
+    error("No barrel found! ATM requires a barrel for diamond collection.")
 end
 
-print("Inventory detected: " .. peripheral.getType(atm.config.inventorySide))
+print("Deposit barrel detected: " .. peripheral.getName(depositBarrel))
 
 -- Find monitor
 local monitor = nil
@@ -113,10 +111,6 @@ end
 -- Generate unique response channel
 atm.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(atm.config.responseChannel)
-
--- Initialize hopper lock (locked by default - prevents items from entering)
--- Redstone output on the same side as the hopper
-redstone.setOutput(atm.config.inventorySide, true)
 
 -- State
 atm.currentAccount = nil
@@ -306,6 +300,36 @@ function atm.processWithdrawal(accountId, diamonds)
     end
 end
 
+-- Helper: Check if item is a diamond
+local function isDiamond(itemName)
+    return itemName == "minecraft:diamond"
+end
+
+-- Helper: Count diamonds in barrel
+local function countDiamondsInBarrel()
+    local totalDiamonds = 0
+    
+    for slot = 1, depositBarrel.size() do
+        local item = depositBarrel.getItemDetail(slot)
+        if item and isDiamond(item.name) then
+            totalDiamonds = totalDiamonds + item.count
+        end
+    end
+    
+    return totalDiamonds
+end
+
+-- Helper: Clear barrel (remove all items)
+local function clearBarrel()
+    for slot = 1, depositBarrel.size() do
+        local item = depositBarrel.getItemDetail(slot)
+        if item then
+            -- Push items out (to void or another storage)
+            depositBarrel.pushItems(atm.config.dispenserSide, slot)
+        end
+    end
+end
+
 -- Create Basalt UI
 local main
 if monitor then
@@ -327,6 +351,7 @@ end
 
 -- Initialize state
 main:initializeState("currentScreen", "home")
+main:initializeState("monitoringBarrel", false)
 
 -- Get terminal size (after setting text scale)
 local termWidth, termHeight
@@ -509,26 +534,40 @@ checkBalanceBtn:onClick(function(self)
     end)
 end)
 
+-- Timer for barrel monitoring
+local barrelMonitorTimer = nil
+
 -- Go to deposit screen
 depositBtn:onClick(function()
+    -- Clear any leftover items from barrel
+    clearBarrel()
+    
     atm.diamondsInserted = 0
     depositCountLabel:setText("Diamonds inserted: 0")
     depositValueLabel:setText("Value: 0")
     
-    -- Unlock hopper (allow items to enter)
-    redstone.setOutput(atm.config.inventorySide, false)
-    
     menuFrame:setVisible(false)
     depositFrame:setVisible(true)
     main:setState("currentScreen", "deposit")
+    
+    -- Start monitoring barrel
+    main:setState("monitoringBarrel", true)
+    barrelMonitorTimer = os.startTimer(0.5)
 end)
 
 -- Confirm deposit
 depositConfirmBtn:onClick(function()
-    -- Lock hopper (prevent more items)
-    redstone.setOutput(atm.config.inventorySide, true)
+    main:setState("monitoringBarrel", false)
     
-    if atm.diamondsInserted == 0 then
+    if barrelMonitorTimer then
+        os.cancelTimer(barrelMonitorTimer)
+        barrelMonitorTimer = nil
+    end
+    
+    -- Count final diamonds in barrel
+    local finalDiamonds = countDiamondsInBarrel()
+    
+    if finalDiamonds == 0 then
         depositFrame:setVisible(false)
         menuFrame:setVisible(true)
         main:setState("currentScreen", "menu")
@@ -538,10 +577,14 @@ depositConfirmBtn:onClick(function()
     depositCountLabel:setText("Processing..."):setForeground(colors.yellow)
     
     basalt.schedule(function()
-        local success, balance = atm.processDeposit(atm.currentAccount, atm.diamondsInserted)
+        local success, balance = atm.processDeposit(atm.currentAccount, finalDiamonds)
         if success then
             atm.currentBalance = balance
             menuBalanceLabel:setText("Balance: " .. balance)
+            
+            -- Clear barrel after successful deposit
+            clearBarrel()
+            
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
@@ -553,8 +596,20 @@ end)
 
 -- Cancel deposit
 depositCancelBtn:onClick(function()
-    -- Lock hopper (prevent more items)
-    redstone.setOutput(atm.config.inventorySide, true)
+    main:setState("monitoringBarrel", false)
+    
+    if barrelMonitorTimer then
+        os.cancelTimer(barrelMonitorTimer)
+        barrelMonitorTimer = nil
+    end
+    
+    -- Return items from barrel (push back to dispenser)
+    for slot = 1, depositBarrel.size() do
+        local item = depositBarrel.getItemDetail(slot)
+        if item then
+            depositBarrel.pushItems(atm.config.dispenserSide, slot)
+        end
+    end
     
     atm.diamondsInserted = 0
     depositFrame:setVisible(false)
@@ -624,69 +679,22 @@ logoutBtn:onClick(function()
     main:setState("currentScreen", "home")
 end)
 
--- Helper: Check if item is a diamond
-local function isDiamond(itemName)
-    return itemName == "minecraft:diamond"
-end
-
--- Register custom event for inventory_changed
-basalt.onEvent("inventory_changed", function()
-    local currentScreen = main:getState("currentScreen")
-    
-    if currentScreen == "deposit" then
-        -- Check for items in inventory
-        local hasItem = false
-        for slot = 1, inventory.size() do
-            local item = inventory.getItemDetail(slot)
-            if item then
-                hasItem = true
-                break
-            end
-        end
+-- Register timer event for barrel monitoring
+basalt.onEvent("timer", function(timerId)
+    if timerId == barrelMonitorTimer then
+        local monitoring = main:getState("monitoringBarrel")
         
-        if hasItem then
-            -- Lock hopper while processing
-            redstone.setOutput(atm.config.inventorySide, true)
+        if monitoring and main:getState("currentScreen") == "deposit" then
+            -- Count diamonds in barrel
+            local diamonds = countDiamondsInBarrel()
             
-            -- Check all items
-            local validDiamonds = 0
-            local invalidItems = 0
+            -- Update display
+            depositCountLabel:setText("Diamonds inserted: " .. diamonds)
+            depositValueLabel:setText("Value: " .. (diamonds * atm.config.diamondValue))
+                :setForeground(diamonds > 0 and colors.green or colorText)
             
-            for slot = 1, inventory.size() do
-                local item = inventory.getItemDetail(slot)
-                if item then
-                    if isDiamond(item.name) then
-                        validDiamonds = validDiamonds + item.count
-                        -- Remove diamonds from inventory
-                        inventory.pushItems(atm.config.dispenserSide, slot)
-                    else
-                        invalidItems = invalidItems + 1
-                        -- Return invalid item
-                        inventory.pushItems(atm.config.dispenserSide, slot)
-                    end
-                end
-            end
-            
-            if validDiamonds > 0 then
-                atm.diamondsInserted = atm.diamondsInserted + validDiamonds
-                depositCountLabel:setText("Diamonds inserted: " .. atm.diamondsInserted)
-                depositValueLabel:setText("Value: " .. (atm.diamondsInserted * atm.config.diamondValue))
-                    :setForeground(colors.green)
-            end
-            
-            if invalidItems > 0 then
-                depositValueLabel:setText("Invalid item(s) rejected!")
-                    :setForeground(colors.red)
-            end
-            
-            -- Schedule unlocking the hopper after a short delay
-            basalt.schedule(function()
-                sleep(0.3)
-                -- Only unlock if still on deposit screen
-                if main:getState("currentScreen") == "deposit" then
-                    redstone.setOutput(atm.config.inventorySide, false)
-                end
-            end)
+            -- Restart timer
+            barrelMonitorTimer = os.startTimer(0.5)
         end
     end
 end)
@@ -730,9 +738,6 @@ basalt.onEvent("card_read", function(info)
                         atm.currentBalance = balance
                         menuBalanceLabel:setText("Balance: " .. balance)
                         
-                        -- Write balance to card
-                        cardReader.write(info.data, "Balance: " .. balance)
-                        
                         -- Success beep and light
                         cardReader.setLight("GREEN", true)
                         cardReader.beep(1500)
@@ -762,7 +767,6 @@ basalt.onEvent("card_read", function(info)
             basalt.schedule(function()
                 local success, accountId = atm.getAccountByCard(info.data)
                 if success and accountId == atm.currentAccount then
-                    cardReader.write(info.data, "Balance: " .. atm.currentBalance)
                     cardReader.beep(1200)
                     cardReader.setLight("GREEN", true)
                     sleep(0.1)
