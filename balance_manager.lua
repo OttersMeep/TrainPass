@@ -384,6 +384,7 @@ end
 -- Handle incoming requests
 function balanceManager.handleRequest(message)
     local request = textutils.unserialize(message)
+    print(message)
     if not request then return nil end
     
     if request.action == "CREATE_ACCOUNT" then
@@ -430,7 +431,7 @@ function balanceManager.handleRequest(message)
         }
         
     elseif request.action == "ADD_CARD" then
-        local success, err = balanceManager.addCard(request.accountId, request.cardUUID, request.nickname)
+        local success, err = balanceManager.addCard(request.accountId, request.cardUUID, request.name)
         print(request.nickname)
         return {
             success = success,

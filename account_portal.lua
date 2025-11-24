@@ -231,7 +231,7 @@ function portal.addCard(accountId, cardUUID, nickname)
             requestType = "ADD_CARD",
             accountId = accountId,
             cardUUID = cardUUID,
-            nickname = nickname,
+            name = nickname,
             timestamp = timestamp
         },
         timestamp = timestamp
