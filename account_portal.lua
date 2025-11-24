@@ -724,22 +724,15 @@ local function cardReaderThread()
                         local newUUID = generateUUID()
                         
                         -- Write UUID and username to card
-                        local writeSuccess = cardReader.write(newUUID, currentUser)
-                        portal.log(textutils.serialize(writeSuccess))
-                        portal.log(writeSuccess)
+                        cardReader.write(newUUID, currentUser
+                        os.pullEvent("card_click")
                         
-                        if not writeSuccess then
-                            addCardStatusLabel:setText("Error: Failed to write to card"):setForeground(colorError)
-                            cardReader.beep(500)
-                            return
-                        end
                         
                         -- Add card to account with new UUID
                         local success, err = portal.addCard(currentAccount.accountId, newUUID)
                         if success then
                             addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
                             cardReader.beep(1500)
-                            os.sleep(2)
                             
                             -- Refresh account info
                             local _, account = portal.getAccountInfo(currentAccount.accountId)
