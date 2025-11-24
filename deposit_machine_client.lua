@@ -264,7 +264,7 @@ function atm.processDeposit(accountId, diamonds)
     
     local response, err = atm.waitForResponse(10)
     if response and response.success then
-        return true, response.balance
+        return true, response.newBalance
     else
         return false, response and response.error or err
     end
@@ -595,12 +595,12 @@ depositConfirmBtn:onClick(function()
         
         if junk > 0 then
             depositValueLabel:setText(junk .. " junk item(s) rejected"):setForeground(colorError)
-            sleep(2)
+            sleep(0.1)
         end
         
         if diamonds == 0 then
             depositCountLabel:setText("No diamonds to deposit"):setForeground(colorError)
-            sleep(2)
+            sleep(0.1)
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
@@ -610,11 +610,13 @@ depositConfirmBtn:onClick(function()
         depositCountLabel:setText("Depositing " .. diamonds .. " diamonds..."):setForeground(colors.yellow)
         
         local success, balance = atm.processDeposit(atm.currentAccount, diamonds)
+        print(success)
+        print(balance)
         if success then
             atm.currentBalance = balance
             menuBalanceLabel:setText("Balance: " .. balance)
             depositCountLabel:setText("Deposit successful!"):setForeground(colorSuccess)
-            sleep(2)
+            sleep(1)
             
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
