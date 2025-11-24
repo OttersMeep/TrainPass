@@ -721,6 +721,7 @@ local function cardReaderThread()
                         -- Write UUID and username to card
                     local currentUser = main:getState("currentUser")
                     cardReader.write(newUUID, currentUser)
+                    portal.log("Wrote to card reader")
                     -- Add card to current account
                     local currentAccount = main:getState("currentAccount")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
