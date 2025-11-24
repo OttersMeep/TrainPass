@@ -585,7 +585,6 @@ local cardList = removeCardFrame:addList()
     :setSize(termWidth - 4, termHeight - 8)
     :setBackground(colors.black)
     :setForeground(colors.white)
-    :setSelectionColor(colors.blue, colors.white)
 
 local removeCardStatusLabel = removeCardFrame:addLabel()
     :setText("")
