@@ -714,16 +714,17 @@ local function cardReaderThread()
                 local screen = main:getState("currentScreen")
                 
                 if screen == "add_card" then
+                                        
+                        -- Generate new UUID for the card
+                    local newUUID = generateUUID()
+                        
+                        -- Write UUID and username to card
+                    cardReader.write(newUUID, currentUser)
                     -- Add card to current account
                     local currentAccount = main:getState("currentAccount")
                     local currentUser = main:getState("currentUser")
                     addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
-                    
-                        -- Generate new UUID for the card
-                        local newUUID = generateUUID()
-                        
-                        -- Write UUID and username to card
-                        cardReader.write(newUUID, currentUser)
+
                         os.pullEvent("card_click")
                         
                         
