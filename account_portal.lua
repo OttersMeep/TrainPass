@@ -593,7 +593,7 @@ local removeSelectedBtn = removeCardFrame:addButton()
     :setSize(17, 3)
     :setBackground(colorError)
     :setForeground(colors.white)
-    :hide()
+    :setVisible(false)
 
 local removeCardStatusLabel = removeCardFrame:addLabel()
     :setText("")
@@ -751,7 +751,7 @@ end)
 -- Go to remove card screen
 removeCardBtn:onClick(function()
     removeCardStatusLabel:setText("Loading cards..."):setForeground(colors.yellow)
-    removeSelectedBtn:hide()
+    removeSelectedBtn:setVisible(false)
     main:setState("selectedCardUUID", nil)
     
     menuFrame:setVisible(false)
@@ -783,7 +783,7 @@ cardList:onChange(function(self, item)
     local uuid = item.args[1]
     if uuid then
         main:setState("selectedCardUUID", uuid)
-        removeSelectedBtn:show()
+        removeSelectedBtn:setVisible(true)
         removeCardStatusLabel:setText("Selected: " .. string.sub(uuid, 1, 8) .. "...")
     end
 end)
@@ -794,7 +794,7 @@ removeSelectedBtn:onClick(function()
     if not uuidToRemove then return end
 
     removeCardStatusLabel:setText("Removing..."):setForeground(colors.yellow)
-    removeSelectedBtn:hide()
+    removeSelectedBtn:setVisible(false)
     
     basalt.schedule(function()
         local currentAccount = main:getState("currentAccount")
@@ -825,7 +825,7 @@ removeSelectedBtn:onClick(function()
             end
         else
             removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-            removeSelectedBtn:show()
+            removeSelectedBtn:setVisible(true)
         end
     end)
 end)
