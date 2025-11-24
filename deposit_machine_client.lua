@@ -546,7 +546,7 @@ local withdrawCancelBtn = withdrawFrame:addButton()
 checkBalanceBtn:onClick(function(self)
     menuBalanceLabel:setText("Checking..."):setForeground(colors.yellow)
     
-    basalt.createThread(function()
+    basalt.schedule(function()
         local success, balance = atm.checkBalance(atm.currentAccount)
         if success then
             atm.currentBalance = balance
@@ -589,19 +589,18 @@ depositConfirmBtn:onClick(function()
     
     depositCountLabel:setText("Processing items..."):setForeground(colors.yellow)
     
-    -- Use a thread instead of schedule for better responsiveness
-    basalt.createThread(function()
+    basalt.schedule(function()
         -- Process items (move diamonds to dispenser, junk to chest)
         local diamonds, junk = processBarrelItems()
         
         if junk > 0 then
             depositValueLabel:setText(junk .. " junk item(s) rejected"):setForeground(colorError)
-            os.sleep(1)
+            sleep(1)
         end
         
         if diamonds == 0 then
             depositCountLabel:setText("No diamonds to deposit"):setForeground(colorError)
-            os.sleep(1)
+            sleep(1)
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
@@ -615,7 +614,7 @@ depositConfirmBtn:onClick(function()
             atm.currentBalance = balance
             menuBalanceLabel:setText("Balance: " .. balance)
             depositCountLabel:setText("Deposit successful!"):setForeground(colorSuccess)
-            os.sleep(1)
+            sleep(1)
             
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
@@ -674,7 +673,7 @@ withdrawConfirmBtn:onClick(function()
     
     withdrawValueLabel:setText("Processing..."):setForeground(colors.yellow)
     
-    basalt.createThread(function()
+    basalt.schedule(function()
         local success, balance = atm.processWithdrawal(atm.currentAccount, diamonds)
         if success then
             atm.currentBalance = balance
@@ -697,7 +696,7 @@ withdrawConfirmBtn:onClick(function()
             end
             
             withdrawValueLabel:setText("Collect your diamonds!"):setForeground(colorSuccess)
-            os.sleep(2)
+            sleep(2)
             
             withdrawFrame:setVisible(false)
             menuFrame:setVisible(true)
@@ -756,12 +755,12 @@ basalt.onEvent("card_read", function(info)
             -- Beep and light to indicate card read
             cardReader.beep(1000)
             cardReader.setLight("YELLOW", true)
-            os.sleep(0.1)
+            sleep(0.1)
             cardReader.setLight("YELLOW", false)
             
             statusLabel:setText("Reading card..."):setForeground(colors.yellow)
             
-            basalt.createThread(function()
+            basalt.schedule(function()
                 -- Look up account from card UUID
                 local success, accountId = atm.getAccountByCard(info.data)
                 if not success then
@@ -770,9 +769,9 @@ basalt.onEvent("card_read", function(info)
                     -- Error beep and light
                     cardReader.setLight("RED", true)
                     cardReader.beep(500)
-                    os.sleep(0.1)
+                    sleep(0.1)
                     cardReader.beep(400)
-                    os.sleep(0.3)
+                    sleep(0.3)
                     cardReader.setLight("RED", false)
                 else
                     statusLabel:setText("Checking balance..."):setForeground(colors.yellow)
@@ -787,9 +786,9 @@ basalt.onEvent("card_read", function(info)
                         -- Success beep and light
                         cardReader.setLight("GREEN", true)
                         cardReader.beep(1500)
-                        os.sleep(0.1)
+                        sleep(0.1)
                         cardReader.beep(1800)
-                        os.sleep(0.2)
+                        sleep(0.2)
                         cardReader.setLight("GREEN", false)
                         
                         homeFrame:setVisible(false)
@@ -801,21 +800,21 @@ basalt.onEvent("card_read", function(info)
                         -- Error beep and light
                         cardReader.setLight("RED", true)
                         cardReader.beep(500)
-                        os.sleep(0.1)
+                        sleep(0.1)
                         cardReader.beep(400)
-                        os.sleep(0.3)
+                        sleep(0.3)
                         cardReader.setLight("RED", false)
                     end
                 end
             end)
         elseif currentScreen == "menu" then
             -- Update card with current balance (verify card matches current account)
-            basalt.createThread(function()
+            basalt.schedule(function()
                 local success, accountId = atm.getAccountByCard(info.data)
                 if success and accountId == atm.currentAccount then
                     cardReader.beep(1200)
                     cardReader.setLight("GREEN", true)
-                    os.sleep(0.1)
+                    sleep(0.1)
                     cardReader.setLight("GREEN", false)
                 end
             end)
