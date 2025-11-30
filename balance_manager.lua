@@ -47,8 +47,6 @@ function balanceManager.generateAccountId(username)
     return hash:toHex():sub(1, 16)
 end
 
--- ...existing code...
--- Create account
 function balanceManager.createAccount(username, publicKey, passwordHash, initialBalance, cardUUIDs)
     print("DEBUG [Balance Manager]: createAccount called")
     print("  username: " .. tostring(username))
@@ -114,9 +112,7 @@ function balanceManager.createAccount(username, publicKey, passwordHash, initial
     print("DEBUG [Balance Manager]: Returning accountId: " .. accountId)
     return accountId, nil
 end
--- ...existing code...
 
--- Add payment card to account
 function balanceManager.addCard(accountId, cardUUID, nickname)
     local account = balanceManager.accounts[accountId]
     if not account then
@@ -148,14 +144,12 @@ function balanceManager.addCard(accountId, cardUUID, nickname)
     return true, nil
 end
 
--- Remove payment card from account
 function balanceManager.removeCard(accountId, cardUUID)
     local account = balanceManager.accounts[accountId]
     if not account then
         return false, "Account not found"
     end
     
-    -- Migrate legacy cardUUIDs to cards structure if needed
     if not account.cards then
         account.cards = {}
         if account.cardUUIDs then
@@ -166,7 +160,6 @@ function balanceManager.removeCard(accountId, cardUUID)
         end
     end
     
-    -- Remove from account
     for i, card in ipairs(account.cards) do
         if card.uuid == cardUUID then
             table.remove(account.cards, i)
@@ -174,13 +167,11 @@ function balanceManager.removeCard(accountId, cardUUID)
         end
     end
     
-    -- Remove from mapping
     balanceManager.cardToAccount[cardUUID] = nil
     
     return true, nil
 end
 
--- Get account by card UUID
 function balanceManager.getAccountByCard(cardUUID)
     local accountId = balanceManager.cardToAccount[cardUUID]
     if accountId then
@@ -189,7 +180,6 @@ function balanceManager.getAccountByCard(cardUUID)
     return nil
 end
 
--- Get account by username
 function balanceManager.getAccountByUsername(username)
     for _, account in pairs(balanceManager.accounts) do
         if account.username == username then
@@ -199,12 +189,10 @@ function balanceManager.getAccountByUsername(username)
     return nil
 end
 
--- Get account by ID
 function balanceManager.getAccount(accountId)
     return balanceManager.accounts[accountId]
 end
 
--- Deposit funds
 function balanceManager.deposit(accountId, amount, depositMachineId, signature)
     
     local account = balanceManager.getAccount(accountId)
