@@ -409,14 +409,6 @@ function gateway.handleGetAccountByCard(data, replyChannel, machineId)
         }, machineId)
     end
 end
-/*
-    elseif request.action == "GET_UNICARD_KEY" then
-        return {
-            success = true,
-            publicKey = publicKey,
-            allowedFields = allowed
-        }
-*/
 
 -- Handle UNICARD key request
 function gateway.handleKeyReq(data, replyChannel, machineId)
