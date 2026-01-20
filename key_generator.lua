@@ -110,6 +110,7 @@ function keyGenerator.handleRequest(message)
         return {
             success = true,
             publicKey = publicKey,
+            privateKey = privateKey
             allowedFields = allowed
         }
     end
@@ -155,6 +156,7 @@ function keyGenerator.load(filename)
         if not keyGenerator.unicardService then
             keyGenerator.unicardService = {
                 publicKey = pub,
+                privateKey = priv
                 allowedKeys = {},
                 createdAt = os.epoch("utc")
             }

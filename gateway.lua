@@ -692,14 +692,6 @@ function gateway.run()
             break
         end
         
-        -- Debug: Log unhandled modem messages to see if they arrive
-        if event == "modem_message" then
-            local side, channel = eventData[2], eventData[3]
-            if channel ~= gateway.wirelessChannel and channel ~= gateway.wiredChannel then
-                -- print("DEBUG [Gateway]: Main loop received message on ephemeral channel: " .. channel)
-            end
-        end
-        
         -- 1. Spawn new threads for incoming messages
         if event == "modem_message" then
             local side, channel, replyChannel, message = eventData[2], eventData[3], eventData[4], eventData[5]

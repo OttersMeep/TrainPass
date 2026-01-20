@@ -98,6 +98,7 @@ portal.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(portal.config.responseChannel)
 
 -- Initialize UniCard client
+portal.sendRequest({requestType="GET_UNICARD_KEY"})
 unicard.init(portal.config.privateKey, ecc.publicKey(portal.config.privateKey))
 print("UniCard client initialized")
 

@@ -33,6 +33,34 @@ unicardServer.config = {
 
 -- Initialize the server
 function unicardServer.init(serverChannel)
+
+        -- Load or generate UC Server keypair (recycle your code)
+    if fs.exists("server_keys.dat") then
+        local file = fs.open("server_keys.dat", "r")
+        if file then
+            local data = textutils.unserialize(file.readAll())
+            file.close()
+            unicardServer.privateKey = data.privateKey
+            unicardServer.publicKey = data.publicKey
+            print("Loaded UC Server keypair")
+        end
+    end
+    -- huh guys this looks familiar almost like this exact thing was in gateway.lua no wayyyy
+    if not unicardServer.privateKey then
+    print("Generating new UC SERVER keypair...")
+    unicardServer.privateKey, unicardServer.publicKey = ecc.keypair()
+    
+    -- Save keypair
+    local file = fs.open("server_keys.dat", "w")
+    if file
+        file.write(textutils.serialize({
+            privateKey = unicardServer.privateKey,
+            publicKey = unicardServer.publicKey
+        }))
+        file.close()
+        print("Gateway keypair saved")
+    end
+
     unicardServer.config.serverChannel = serverChannel or 200
     
     -- Find wireless modem (UniCard uses wireless, separate from TrainPass network)
@@ -149,7 +177,7 @@ local function checkOwnership(cardUUID, key, publicKey)
 end
 
 -- Handle GET_KEY request
-local function handleGetKey(request)
+local function handleGetField(request)
     local cardUUID = request.cardUUID
     local key = request.key
     
@@ -170,7 +198,7 @@ local function handleGetKey(request)
 end
 
 -- Handle SET_KEY request
-local function handleSetKey(request)
+local function handleSetField(request)
     local cardUUID = request.cardUUID
     local key = request.key
     local value = request.value
@@ -201,7 +229,7 @@ local function handleSetKey(request)
 end
 
 -- Handle DELETE_KEY request
-local function handleDeleteKey(request)
+local function handleDeleteField(request)
     local cardUUID = request.cardUUID
     local key = request.key
     local publicKey = request.publicKey
@@ -229,7 +257,7 @@ local function handleDeleteKey(request)
 end
 
 -- Handle LIST_KEYS request
-local function handleListKeys(request)
+local function handleListField(request)
     local cardUUID = request.cardUUID
     local publicKey = request.publicKey
     
@@ -266,14 +294,14 @@ local function handleRequest(request, replyChannel)
     end
     
     -- Route to appropriate handler
-    if request.requestType == "GET_KEY" then
-        return handleGetKey(request)
-    elseif request.requestType == "SET_KEY" then
-        return handleSetKey(request)
-    elseif request.requestType == "DELETE_KEY" then
-        return handleDeleteKey(request)
-    elseif request.requestType == "LIST_KEYS" then
-        return handleListKeys(request)
+    if request.requestType == "GET_FIELD" then
+        return handleGetField(request)
+    elseif request.requestType == "SET_FIELD" then
+        return handleSetField(request)
+    elseif request.requestType == "DELETE_FIELD" then
+        return handleDeleteField(request)
+    elseif request.requestType == "LIST_FIELD" then
+        return handleListField(request)
     else
         return {
             success = false,
@@ -321,7 +349,7 @@ local function saveKeypairToDisk(serviceId, privateKey, publicKey)
     end
 
     local base = fs.combine(mount, serviceId)
-    local pubPath = base .. "_public.key"
+    local pubPath = "uc_server_public.key"
     local privPath = base .. "_private.key"
 
     local pubFile = fs.open(pubPath, "w")
@@ -331,7 +359,7 @@ local function saveKeypairToDisk(serviceId, privateKey, publicKey)
         if privFile then privFile.close() end
         return false, "Failed to write key files"
     end
-    pubFile.write(textutils.serialize(publicKey))
+    pubFile.write(textutils.serialize(unicardServer.publicKey))
     privFile.write(textutils.serialize(privateKey))
     pubFile.close()
     privFile.close()
