@@ -745,4 +745,7 @@ function gateway.run()
     end
 end
 
+gateway.init()
+gateway.run()
+
 return gateway
