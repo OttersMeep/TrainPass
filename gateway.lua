@@ -633,7 +633,7 @@ function gateway.handleWirelessMessage(message, replyChannel)
         gateway.handleGetAccount(data, replyChannel, machineId)
     elseif data.requestType == "LOGIN" then
         gateway.handleLogin(data, replyChannel, machineId)
-    elseif data.requestType == "GET_UNICARD_KEY"
+    elseif data.requestType == "GET_UNICARD_KEY" then
         gateway.handleKeyReq(data, replyChannel, machineId)
     else
         print("DEBUG [Gateway]: Unknown request type")
