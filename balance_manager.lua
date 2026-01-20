@@ -198,17 +198,21 @@ function balanceManager.deposit(accountId, amount, depositMachineId, signature)
     local account = balanceManager.getAccount(accountId)
     if not account then
         print("Account not found")
-        return nil, "Account not found"
+        return nil, nil, "Account not found"
     end
     
     if not account.active then
         print("Inactive Account")
-        return nil, "Account is inactive"
+        return nil, nil, "Account is inactive"
     end
     
     if account.balance + amount > balanceManager.config.maxBalance then
         print("Deposit exceeds maximum")
-        return nil, "Deposit would exceed maximum balance"
+        return nil, nil, "Deposit would exceed maximum balance"
+    end
+
+    if account.balance + amount < 0 then
+        return nil, nil, "Not enough funds"
     end
     
     -- Update balance
@@ -230,20 +234,20 @@ end
 -- Charge vendor (payment card transaction)
 function balanceManager.chargeVendor(accountId, vendorId, vendorType, amount, metadata)
     if amount <= 0 then
-        return nil, "Amount must be positive"
+        return nil, nil, "Amount must be positive"
     end
     
     local account = balanceManager.getAccount(accountId)
     if not account then
-        return nil, "Account not found"
+        return nil, nil, "Account not found"
     end
     
     if not account.active then
-        return nil, "Account is inactive"
+        return nil, nil, "Account is inactive"
     end
     
     if account.balance < amount then
-        return nil, "Insufficient funds"
+        return nil, nil, "Insufficient funds"
     end
     
     -- Charge
@@ -299,19 +303,19 @@ end
 -- Transfer between accounts
 function balanceManager.transfer(fromAccountId, toAccountId, amount, memo)
     if amount <= 0 then
-        return nil, "Amount must be positive"
+        return nil, nil, "Amount must be positive"
     end
     
     local fromAccount = balanceManager.getAccount(fromAccountId)
     local toAccount = balanceManager.getAccount(toAccountId)
     
-    if not fromAccount then return nil, "Source account not found" end
-    if not toAccount then return nil, "Destination account not found" end
-    if not fromAccount.active then return nil, "Source account is inactive" end
-    if not toAccount.active then return nil, "Destination account is inactive" end
+    if not fromAccount then return nil, nil, "Source account not found" end
+    if not toAccount then return nil, nil, "Destination account not found" end
+    if not fromAccount.active then return nil, nil, "Source account is inactive" end
+    if not toAccount.active then return nil, nil, "Destination account is inactive" end
     
     if fromAccount.balance < amount then
-        return nil, "Insufficient funds"
+        return nil, nil, "Insufficient funds"
     end
     
     -- Transfer

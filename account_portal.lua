@@ -2,7 +2,6 @@
 -- Allows users to create accounts, add/remove payment cards
 -- Uses username/password authentication with Basalt UI
 
--- Check for Basalt
 if not fs.exists("basalt.lua") then
     print("Downloading Basalt UI library...")
     shell.run("wget", "run", "https://basalt.madefor.cc/install.lua", "release", "latest.lua", "basalt.lua")
@@ -13,6 +12,7 @@ end
 
 local ecc = require("ecc")
 local basalt = require("basalt")
+local unicard = require("unicard")
 
 local portal = {}
 
@@ -96,6 +96,10 @@ end
 -- Generate unique response channel
 portal.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(portal.config.responseChannel)
+
+-- Initialize UniCard client
+unicard.init(portal.config.privateKey, ecc.publicKey(portal.config.privateKey))
+print("UniCard client initialized")
 
 -- State
 portal.currentUser = nil
@@ -490,23 +494,30 @@ local menuCardsLabel = menuFrame:addLabel()
     :setPosition(2, 5)
     :setForeground(colorText)
 
-local addCardBtn = menuFrame:addButton()
-    :setText("Add Card")
+local writeNewCardBtn = menuFrame:addButton()
+    :setText("Write New UniCard")
     :setPosition(2, 8)
+    :setSize(15, 3)
+    :setBackground(colorPrimary)
+    :setForeground(colors.white)
+
+local addUnicardBtn = menuFrame:addButton()
+    :setText("Add UniCard")
+    :setPosition(18, 8)
     :setSize(15, 3)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local removeCardBtn = menuFrame:addButton()
     :setText("Remove Card")
-    :setPosition(18, 8)
+    :setPosition(2, 12)
     :setSize(15, 3)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local menuLogoutBtn = menuFrame:addButton()
     :setText("Logout")
-    :setPosition(2, 12)
+    :setPosition(18, 12)
     :setSize(15, 3)
     :setBackground(colorError)
     :setForeground(colors.white)
@@ -516,8 +527,7 @@ local menuStatusLabel = menuFrame:addLabel()
     :setPosition(2, 16)
     :setForeground(colorError)
 
--- Add Card Screen
--- Add Card Screen
+-- Write New UniCard Screen
 local addCardFrame = main:addFrame()
     :setPosition(1, 1)
     :setSize(termWidth, termHeight)
@@ -525,7 +535,7 @@ local addCardFrame = main:addFrame()
     :setVisible(false)
 
 addCardFrame:addLabel()
-    :setText("Add Card")
+    :setText("Write New UniCard")
     :setPosition(2, 2)
     :setForeground(colorPrimary)
 
@@ -683,15 +693,10 @@ loginConfirmBtn:onClick(function()
             
             -- Update menu
             menuUsernameLabel:setText("User: " .. username)
-            menuBalanceLabel:setText("Balance: " .. account.balance)
+                        menuBalanceLabel:setText("Balance: " .. account.balance)
             
-            -- FIX: Handle both new 'cards' structure and legacy 'cardUUIDs'
-            local cardCount = 0
-            if account.cards then
-                cardCount = #account.cards
-            elseif account.cardUUIDs then
-                cardCount = #account.cardUUIDs
-            end
+            -- FIX: Use 'cards' structure exclusively
+            local cardCount = account.cards and #account.cards or 0
             menuCardsLabel:setText("Cards: " .. cardCount)
             
             loginFrame:setVisible(false)
@@ -710,13 +715,22 @@ loginCancelBtn:onClick(function()
     main:setState("currentScreen", "home")
 end)
 
-addCardBtn:onClick(function()
+writeNewCardBtn:onClick(function()
     main:setState("cardNickname", "")
     addCardStatusLabel:setText("Enter nickname & click Start"):setForeground(colors.yellow)
     addCardStartBtn:setVisible(true)
     menuFrame:setVisible(false)
     addCardFrame:setVisible(true)
     main:setState("currentScreen", "add_card_setup")
+end)
+
+-- Add existing UniCard button handler
+addUnicardBtn:onClick(function()
+    menuFrame:setVisible(false)
+    addCardFrame:setVisible(true)
+    addCardStatusLabel:setText("Tap your UniCard..."):setForeground(colors.yellow)
+    addCardStartBtn:setVisible(false)
+    main:setState("currentScreen", "add_existing_unicard")
 end)
 
 -- Start card write process
@@ -740,7 +754,7 @@ addCardStartBtn:onClick(function()
     portal.log("Writing to card reader...")
     
     -- Write nickname to card for user convenience
-    cardReader.write(newUUID, nickname)
+    cardReader.write(newUUID, "PASMO: " .. nickname)
     
     portal.log("Card reader ready")
     addCardStatusLabel:setText("Tap card to add..."):setForeground(colors.yellow)
@@ -762,17 +776,11 @@ removeCardBtn:onClick(function()
     cardList:clear()
     local account = main:getState("currentAccount")
     
-    -- Assuming account.cards is a list of objects {uuid, nickname}
-    -- If legacy data (just UUID strings), handle gracefully
+    -- Populate list from account.cards
     if account.cards then
         for _, card in pairs(account.cards) do
             local label = (card.nickname or "Unknown") .. " (" .. string.sub(card.uuid, 1, 8) .. "...)"
             cardList:addItem(label, nil, card.uuid)
-        end
-    elseif account.cardUUIDs then
-        -- Legacy support
-        for _, uuid in pairs(account.cardUUIDs) do
-            cardList:addItem("Card (" .. string.sub(uuid, 1, 8) .. "...)", nil, uuid)
         end
     end
     removeCardStatusLabel:setText("")
@@ -781,20 +789,14 @@ end)
 -- Handle card list selection
 cardList:onSelect(function(item, index)
     portal.log("Select Call 1")
-    if not item then return end
+        if not item then return end
     portal.log("Selected Something")
     local account = main:getState("currentAccount")
     local uuid = nil
     
     -- Use the list index to retrieve the UUID directly from the account data
-    -- This ensures we get the correct UUID corresponding to the list position
-    if account then
-        if account.cards and account.cards[index] then
-            uuid = account.cards[index].uuid
-        elseif account.cardUUIDs and account.cardUUIDs[index] then
-            -- Legacy support
-            uuid = account.cardUUIDs[index]
-        end
+    if account and account.cards and account.cards[index] then
+        uuid = account.cards[index].uuid
     end
 
     if uuid then
@@ -817,30 +819,29 @@ removeSelectedBtn:onClick(function()
     basalt.schedule(function()
         local currentAccount = main:getState("currentAccount")
         local success, err = portal.removeCard(currentAccount.accountId, uuidToRemove)
-        
+
         if success then
-            removeCardStatusLabel:setText("Card removed!"):setForeground(colorSuccess)
-            os.sleep(1)
-            
-            -- Refresh account info
-            local _, account = portal.getAccountInfo(currentAccount.accountId)
-            if account then
-                main:setState("currentAccount", account)
-                -- Refresh list
-                cardList:clear()
-                main:setState("selectedCardUUID", nil)
-                
-                if account.cards then
-                    for _, card in pairs(account.cards) do
-                        local label = (card.nickname or "Unknown") .. " (" .. string.sub(card.uuid, 1, 8) .. "...)"
-                        cardList:addItem(label, nil, card.uuid)
-                    end
+            -- Update local state
+            for i, card in ipairs(currentAccount.cards) do
+                if card.uuid == uuidToRemove then
+                    table.remove(currentAccount.cards, i)
+                    break
                 end
-                
-                -- Update menu label count
-                local cardCount = account.cards and #account.cards or (account.cardUUIDs and #account.cardUUIDs or 0)
-                menuCardsLabel:setText("Cards: " .. cardCount)
             end
+            main:setState("currentAccount", currentAccount)
+            
+            -- Refresh list
+            cardList:clear()
+            for _, card in pairs(currentAccount.cards) do
+                local label = (card.nickname or "Unknown") .. " (" .. string.sub(card.uuid, 1, 8) .. "...)"
+                cardList:addItem(label, nil, card.uuid)
+            end
+            
+            removeCardStatusLabel:setText("Removed successfully"):setForeground(colorSuccess)
+            
+            -- Update menu label
+            local cardCount = currentAccount.cards and #currentAccount.cards or 0
+            menuCardsLabel:setText("Cards: " .. cardCount)
         else
             removeCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
             removeSelectedBtn:setVisible(true)
@@ -877,7 +878,7 @@ basalt.onEvent("card_read", function(info)
         local screen = main:getState("currentScreen")
         
         if screen == "add_card_wait" then
-            -- Card was tapped, now add it to the account
+            -- Write New UniCard: Card was tapped, write account ID to UniCard server and add to account
             local newUUID = main:getState("pendingCardUUID")
             local nickname = main:getState("cardNickname")
             local currentAccount = main:getState("currentAccount")
@@ -885,18 +886,102 @@ basalt.onEvent("card_read", function(info)
             portal.log("Card tapped with UUID: " .. tostring(info.data))
             
             if newUUID then
-                addCardStatusLabel:setText("Adding card..."):setForeground(colors.yellow)
+                addCardStatusLabel:setText("Writing to UniCard server..."):setForeground(colors.yellow)
                 
                 basalt.schedule(function()
-                    local success, err = portal.addCard(currentAccount.accountId, newUUID, nickname)
-                    if success then
-                        addCardStatusLabel:setText("Card added!"):setForeground(colorSuccess)
+                    -- Write account ID to UniCard server
+                    local success, err = unicard.setKey("pasmo_account_id", currentAccount.accountId, newUUID)
+                    
+                    if not success then
+                        addCardStatusLabel:setText("UniCard write failed: " .. tostring(err)):setForeground(colorError)
+                        addCardStartBtn:setVisible(true)
+                        return
+                    end
+                    
+                    -- Add card to account
+                    addCardStatusLabel:setText("Adding card to account..."):setForeground(colors.yellow)
+                    local success2, err2 = portal.addCard(currentAccount.accountId, newUUID, nickname)
+                    if success2 then
+                        addCardStatusLabel:setText("UniCard created!"):setForeground(colorSuccess)
                         cardReader.beep(1500)
                         
                         -- Refresh account info
                         local _, account = portal.getAccountInfo(currentAccount.accountId)
                         if account then
                             main:setState("currentAccount", account)
+                            local cardCount = account.cards and #account.cards or 0
+                            menuCardsLabel:setText("Cards: " .. cardCount)
+                        end
+                        
+                        sleep(2)
+                        addCardFrame:setVisible(false)
+                        menuFrame:setVisible(true)
+                        main:setState("currentScreen", "menu")
+                    else
+                        addCardStatusLabel:setText("Error: " .. tostring(err2)):setForeground(colorError)
+                        addCardStartBtn:setVisible(true)
+                    end
+                end)
+            end
+        elseif screen == "add_existing_unicard" then
+            -- Add UniCard: Read account ID from UniCard and add to account
+            local cardUUID = info.data
+            local currentAccount = main:getState("currentAccount")
+            
+            portal.log("Reading UniCard with UUID: " .. tostring(cardUUID))
+            addCardStatusLabel:setText("Reading UniCard..."):setForeground(colors.yellow)
+            
+            basalt.schedule(function()
+                -- Read account ID from UniCard
+                local accountId, err = unicard.getKey("pasmo_account_id", cardUUID)
+                
+                if not accountId then
+                    addCardStatusLabel:setText("Not a PASMO UniCard"):setForeground(colorError)
+                    sleep(2)
+                    addCardFrame:setVisible(false)
+                    menuFrame:setVisible(true)
+                    main:setState("currentScreen", "menu")
+                    return
+                end
+                
+                -- Verify it matches current account
+                if accountId ~= currentAccount.accountId then
+                    addCardStatusLabel:setText("Card belongs to different account"):setForeground(colorError)
+                    sleep(2)
+                    addCardFrame:setVisible(false)
+                    menuFrame:setVisible(true)
+                    main:setState("currentScreen", "menu")
+                    return
+                end
+                
+                -- Add card to account (generates default nickname)
+                addCardStatusLabel:setText("Adding UniCard..."):setForeground(colors.yellow)
+                local success, err2 = portal.addCard(currentAccount.accountId, cardUUID, "UniCard")
+                
+                if success then
+                    addCardStatusLabel:setText("UniCard added!"):setForeground(colorSuccess)
+                    cardReader.beep(1500)
+                    
+                    -- Refresh account info
+                    local _, account = portal.getAccountInfo(currentAccount.accountId)
+                    if account then
+                        main:setState("currentAccount", account)
+                        local cardCount = account.cards and #account.cards or 0
+                        menuCardsLabel:setText("Cards: " .. cardCount)
+                    end
+                    
+                    sleep(2)
+                    addCardFrame:setVisible(false)
+                    menuFrame:setVisible(true)
+                    main:setState("currentScreen", "menu")
+                else
+                    addCardStatusLabel:setText("Error: " .. tostring(err2)):setForeground(colorError)
+                    sleep(2)
+                    addCardFrame:setVisible(false)
+                    menuFrame:setVisible(true)
+                    main:setState("currentScreen", "menu")
+                end
+            end)
                             menuCardsLabel:setText("Cards: " .. (account.cards and #account.cards or #account.cardUUIDs))
                         end
                         

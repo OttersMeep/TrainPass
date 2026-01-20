@@ -138,9 +138,9 @@ function ledger.save(filename)
     local file = fs.open(filename, "w")
     if not file then return false end
     
+    -- Only save transactions array, rebuild index on load
     file.write(textutils.serialize({
         transactions = ledger.transactions,
-        transactionIndex = ledger.transactionIndex,
         counter = ledger.counter
     }))
     file.close()
@@ -160,8 +160,13 @@ function ledger.load(filename)
     
     if data then
         ledger.transactions = data.transactions or {}
-        ledger.transactionIndex = data.transactionIndex or {}
         ledger.counter = data.counter or 0
+        
+        -- Rebuild transactionIndex from transactions array
+        ledger.transactionIndex = {}
+        for _, transaction in ipairs(ledger.transactions) do
+            ledger.transactionIndex[transaction.id] = transaction
+        end
         return true
     end
     

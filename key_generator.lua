@@ -6,10 +6,50 @@ local keyGenerator = {}
 
 -- Wired modem
 keyGenerator.modem = nil
-keyGenerator.serverChannel = 102 -- Internal server channel
+keyGenerator.serverChannel =  -- Internal server channel
 
 -- Key storage
 keyGenerator.generatedKeys = {} -- History of generated keys
+keyGenerator.unicardService = nil -- Single UniCard service keypair metadata (public, allowedKeys)
+keyGenerator.unicardPrivateKey = nil -- Loaded from disk (never serialized to data file)
+
+loadedPub, loadedPriv = loadUniCardKeypairFromDisk()
+
+-- Disk helpers for UniCard keypair
+local function findDiskDrive()
+    return peripheral.find("drive")
+end
+
+local function loadUniCardKeypairFromDisk()
+    local driveName = findDiskDrive()
+    if not driveName or not disk.isPresent(driveName) then
+        return nil, nil, "No disk present"
+    end
+    local mount = disk.getMountPath(driveName)
+    if not mount then
+        return nil, nil, "Disk not mounted"
+    end
+    local pubPath = fs.combine(mount, "unicard_public.key")
+    local privPath = fs.combine(mount, "unicard_private.key")
+    if not (fs.exists(pubPath) and fs.exists(privPath)) then
+        return nil, nil, "Key files not found on disk"
+    end
+    local pubFile = fs.open(pubPath, "r")
+    local privFile = fs.open(privPath, "r")
+    if not pubFile or not privFile then
+        if pubFile then pubFile.close() end
+        if privFile then privFile.close() end
+        return nil, nil, "Failed to read key files"
+    end
+    local publicKey = textutils.unserialize(pubFile.readAll())
+    local privateKey = textutils.unserialize(privFile.readAll())
+    pubFile.close()
+    privFile.close()
+    if not publicKey or not privateKey then
+        return nil, nil, "Key files corrupted"
+    end
+    return publicKey, privateKey, nil
+end
 
 -- Initialize
 function keyGenerator.init()
@@ -29,8 +69,6 @@ end
 -- Generate a keypair for an account
 function keyGenerator.generateKeypair(accountId)
     local ecc = require("ecc")
-    
-    -- Generate keypair (random if no accountId seed)
     local privateKey, publicKey = ecc.keypair()
     
     -- Store in history
@@ -38,8 +76,7 @@ function keyGenerator.generateKeypair(accountId)
         accountId = accountId,
         publicKey = publicKey,
         timestamp = os.epoch("utc"),
-        -- Note: Private key is NOT stored on key generator
-        -- It should be given to the client and deleted from memory
+        -- Note that we don't store the private key!
     })
     
     return {
@@ -47,6 +84,7 @@ function keyGenerator.generateKeypair(accountId)
         privateKey = privateKey
     }
 end
+
 
 -- Handle incoming requests
 function keyGenerator.handleRequest(message)
@@ -68,6 +106,12 @@ function keyGenerator.handleRequest(message)
             publicKey = keys.publicKey,
             privateKey = keys.privateKey
         }
+    elseif request.action == "GET_UNICARD_KEY" then
+        return {
+            success = true,
+            publicKey = publicKey,
+            allowedFields = allowed
+        }
     end
     
     print("Unknown action: " .. tostring(request.action))
@@ -82,7 +126,8 @@ function keyGenerator.save(filename)
     
     -- Only save public keys and metadata (never private keys)
     file.write(textutils.serialize({
-        generatedKeys = keyGenerator.generatedKeys
+        generatedKeys = keyGenerator.generatedKeys,
+        unicardService = keyGenerator.unicardService
     }))
     file.close()
     return true
@@ -91,20 +136,32 @@ end
 -- Load key history
 function keyGenerator.load(filename)
     filename = filename or "key_generator.dat"
-    if not fs.exists(filename) then return false end
-    
-    local file = fs.open(filename, "r")
-    if not file then return false end
-    
-    local data = textutils.unserialize(file.readAll())
-    file.close()
-    
-    if data then
-        keyGenerator.generatedKeys = data.generatedKeys or {}
-        return true
+    if fs.exists(filename) then
+        local file = fs.open(filename, "r")
+        if file then
+            local data = textutils.unserialize(file.readAll())
+            file.close()
+            if data then
+                keyGenerator.generatedKeys = data.generatedKeys or {}
+                keyGenerator.unicardService = data.unicardService or nil
+            end
+        end
     end
-    
-    return false
+
+    -- Always try to load the UniCard keypair from disk
+    local pub, priv = loadUniCardKeypairFromDisk()
+    if pub and priv then
+        keyGenerator.unicardPrivateKey = priv
+        if not keyGenerator.unicardService then
+            keyGenerator.unicardService = {
+                publicKey = pub,
+                allowedKeys = {},
+                createdAt = os.epoch("utc")
+            }
+        end
+    end
+
+    return true
 end
 
 -- Main server loop

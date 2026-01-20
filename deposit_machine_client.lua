@@ -1,4 +1,6 @@
+
 local ecc = require("ecc")
+local unicard = require("unicard")
 if not fs.exists("basalt.lua") then
     print("Downloading Basalt UI library...")
     shell.run("wget", "run", "https://basalt.madefor.cc/install.lua", "release", "latest.lua", "basalt.lua")
@@ -15,9 +17,10 @@ atm.config = {
     machineId = "DEPOSIT_005",
     privateKey = "",  -- Set this!
     diamondValue = 100,  -- Balance units per diamond
-    monitorSide = "top",  -- Side with monitor (default top, auto-detect if nil)
     gatewayChannel = 1000,
-    responseChannel = nil  -- Will be set dynamically
+    responseChannel = nil,  -- Will be set dynamically
+    adminPassword = "Benchy",  -- Default admin password for termination
+    testing = true  -- If true, don't shutdown on errors (for development)
 }
 
 -- Load configuration from machine_config.lua if it exists
@@ -39,7 +42,8 @@ if fs.exists("machine_config.lua") then
         end
         atm.config.diamondValue = machineConfig.diamondValue or atm.config.diamondValue
         atm.config.gatewayChannel = machineConfig.gatewayChannel or atm.config.gatewayChannel
-        atm.config.monitorSide = machineConfig.monitorSide or atm.config.monitorSide
+        atm.config.adminPassword = machineConfig.adminPassword or atm.config.adminPassword
+        atm.config.testing = machineConfig.testing or atm.config.testing
     end
 end
 
@@ -60,47 +64,29 @@ print("Gateway public key: " .. #atm.config.gatewayPublicKey .. " bytes")
 atm.sharedSecret = ecc.exchange(atm.config.privateKey, atm.config.gatewayPublicKey)
 print("Shared secret derived: " .. #atm.sharedSecret .. " bytes")
 
--- Find source barrel
-local sourceBarrel = peripheral.find("minecraft:barrel")
-if not sourceBarrel then
-    error("No barrel found! ATM requires a barrel for deposits.")
-end
-print("Source barrel detected: " .. peripheral.getName(sourceBarrel))
+-- Find wired modem
+local wiredModem = peripheral.find("modem", function(name, modem)
+    return not modem.isWireless()
+end)
 
--- Find junk chest
-local junkChest = peripheral.find("minecraft:chest")
-if not junkChest then
-    error("No chest found! ATM requires a chest for junk items.")
+if not wiredModem then
+    error("No wired modem found! Deposit machine requires wired modem for peripherals.")
 end
-print("Junk chest detected: " .. peripheral.getName(junkChest))
+print("Wired modem detected: " .. peripheral.getName(wiredModem))
 
--- Find diamond dispenser
-local diamondDispenser = peripheral.find("minecraft:dispenser")
-if not diamondDispenser then
-    error("No dispenser found! ATM requires a dispenser for diamonds.")
+-- Find input barrel (for receiving diamonds)
+local barrel = peripheral.find("minecraft:barrel")
+if not barrel then
+    error("No barrel found! Deposit machine requires a barrel for diamond input.")
 end
-print("Diamond dispenser detected: " .. peripheral.getName(diamondDispenser))
+print("Input barrel detected: " .. peripheral.getName(barrel))
 
--- Find monitor
-local monitor = nil
-if atm.config.monitorSide then
-    -- Use specified side
-    monitor = peripheral.wrap(atm.config.monitorSide)
-    if not monitor then
-        error("No monitor found on " .. atm.config.monitorSide .. " side!")
-    end
-else
-    -- Auto-detect monitor
-    monitor = peripheral.find("monitor")
-    if not monitor then
-        print("WARNING: No monitor found. Using computer terminal.")
-    end
+-- Find storage chest (for storing diamonds)
+local storageChest = peripheral.find("minecraft:chest")
+if not storageChest then
+    error("No chest found! Deposit machine requires a chest for diamond storage.")
 end
-
-if monitor then
-    print("Monitor detected: " .. peripheral.getName(monitor))
-    print("Monitor size: " .. monitor.getSize())
-end
+print("Storage chest detected: " .. peripheral.getName(storageChest))
 
 -- Find card reader
 local cardReader = peripheral.find("card_reader")
@@ -123,11 +109,16 @@ end
 atm.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(atm.config.responseChannel)
 
+-- Initialize UniCard client
+unicard.init(atm.config.privateKey, ecc.publicKey(atm.config.privateKey))
+print("UniCard client initialized")
+
 -- State
 atm.currentAccount = nil
 atm.currentBalance = 0
 atm.diamondsInserted = 0
 atm.waitingForResponse = false
+atm.diamondTally = 0  -- Expected number of diamonds in storage
 
 -- Send request to gateway
 function atm.sendRequest(requestData)
@@ -193,31 +184,16 @@ function atm.waitForResponse(timeout)
     end
 end
 
--- Look up account by card UUID
+-- Look up account by card UUID using UniCard
 function atm.getAccountByCard(cardUUID)
-    local timestamp = os.epoch("utc")
+    -- Read account ID from UniCard server
+    local accountId, err = unicard.getKey("pasmo_account_id", cardUUID)
     
-    print("Looking up account for card: " .. tostring(cardUUID))
-    
-    atm.sendRequest({
-        data = {
-            requestType = "GET_ACCOUNT_BY_CARD",
-            cardUUID = cardUUID,
-            depositMachineId = atm.config.machineId,
-            timestamp = timestamp
-        },
-        timestamp = timestamp
-    })
-    
-    print("Request sent, waiting for response...")
-    local response, err = atm.waitForResponse(10)
-    print("Response received: " .. textutils.serialize(response or {error = err}))
-    
-    if response and response.success and response.accountId then
-        return true, response.accountId
-    else
-        return false, response and response.error or err or "Card not registered"
+    if not accountId then
+        return false, "Card not registered with PASMO"
     end
+    
+    return true, accountId
 end
 
 -- Check balance
@@ -264,19 +240,18 @@ function atm.processDeposit(accountId, diamonds)
     
     local response, err = atm.waitForResponse(10)
     if response and response.success then
-        return true, response.newBalance
+        return true, response.newBalance or response.balance
     else
         return false, response and response.error or err
     end
 end
 
 -- Process withdrawal
-function atm.processWithdrawal(accountId, diamonds)
-    local amount = diamonds * atm.config.diamondValue
+function atm.processWithdrawal(accountId, amount)
     local timestamp = os.epoch("utc")
     
-    -- Create signature for the request (negative amount for withdrawal)
-    local signedMessage = accountId .. (-amount) .. timestamp
+    -- Create signature for the request
+    local signedMessage = accountId .. amount .. timestamp
     local signature = ecc.sign(atm.config.privateKey, signedMessage)
     
     atm.sendRequest({
@@ -284,7 +259,7 @@ function atm.processWithdrawal(accountId, diamonds)
             requestType = "DEPOSIT",
             depositMachineId = atm.config.machineId,
             accountId = accountId,
-            amount = -amount,  -- Negative amount = withdrawal
+            amount = amount,
             timestamp = timestamp,
             signature = signature
         },
@@ -293,28 +268,21 @@ function atm.processWithdrawal(accountId, diamonds)
     
     local response, err = atm.waitForResponse(10)
     if response and response.success then
-        -- Pull diamonds from dispenser (they should already be there)
-        return true, response.balance
+        return true, response.newBalance or response.balance
     else
         return false, response and response.error or err
     end
 end
 
--- Helper: Check if item is a diamond
-local function isDiamond(itemName)
-    return itemName == "minecraft:diamond"
-end
 
--- Helper: Count diamonds in source barrel
-local function countDiamondsInBarrel()
+
+-- Helper: Count diamonds in storage chest
+local function countDiamondsInChest()
     local totalDiamonds = 0
+    local items = storageChest.list()
     
-    for slot = 1, sourceBarrel.size() do
-        local item = sourceBarrel.getItemDetail(slot)
-        if not item then
-            break -- Optimization: Hopper fills sequentially, so empty slot means end of items
-        end
-        if isDiamond(item.name) then
+    for slot, item in pairs(items) do
+        if item.name == "minecraft:diamond" then
             totalDiamonds = totalDiamonds + item.count
         end
     end
@@ -322,73 +290,94 @@ local function countDiamondsInBarrel()
     return totalDiamonds
 end
 
--- Helper: Process items in source barrel (sort diamonds from junk)
-local function processBarrelItems()
-    local diamondCount = 0
-    local junkCount = 0
-    
-    -- Go through each slot in source barrel
-    for slot = 1, sourceBarrel.size() do
-        local item = sourceBarrel.getItemDetail(slot)
-        if not item then
-            break -- Optimization: Hopper fills sequentially
-        end
-        
-        if isDiamond(item.name) then
-            -- Move diamonds to dispenser
-            local moved = sourceBarrel.pushItems(peripheral.getName(diamondDispenser), slot)
-            diamondCount = diamondCount + moved
-        else
-            -- Move junk to junk chest
-            local moved = sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
-            junkCount = junkCount + moved
-        end
-    end
-    
-    return diamondCount, junkCount
-end
-
--- Helper: Clear source barrel (return all items to junk chest)
-local function clearBarrel()
-    for slot = 1, sourceBarrel.size() do
-        local item = sourceBarrel.getItemDetail(slot)
-        if not item then
-            break -- Optimization: Hopper fills sequentially
-        end
-        sourceBarrel.pushItems(peripheral.getName(junkChest), slot)
+-- Helper: Save diamond tally to disk
+local function saveDiamondTally()
+    local file = fs.open("diamond_tally.dat", "w")
+    if file then
+        file.write(tostring(atm.diamondTally))
+        file.close()
     end
 end
 
--- Create Basalt UI
-local main
-if monitor then
-    -- Use monitor for UI
-    -- Set text scale to 0.5 to make text smaller and fit more on screen
-    monitor.setTextScale(0.5)
-    main = basalt.createFrame():setTerm(monitor)
-    term.clear()
-    term.setCursorPos(1, 1)
-    print("=== TrainPass ATM ===")
-    print("Machine: " .. atm.config.machineId)
-    print("")
-    print("UI displayed on monitor")
-    print("Press X to exit")
-else
-    -- Use computer terminal
-    main = basalt.createFrame()
+-- Helper: Load diamond tally from disk
+local function loadDiamondTally()
+    if fs.exists("diamond_tally.dat") then
+        local file = fs.open("diamond_tally.dat", "r")
+        if file then
+            local tally = tonumber(file.readAll())
+            file.close()
+            return tally or 0
+        end
+    end
+    return nil
 end
+
+-- Helper: Transfer diamonds from barrel to storage chest
+local function processBarrelDeposit()
+    local items = barrel.list()
+    local diamondSlots = {}
+    
+    -- Find all slots with diamonds
+    for slot, item in pairs(items) do
+        if item.name == "minecraft:diamond" then
+            table.insert(diamondSlots, slot)
+        end
+    end
+    
+    -- Count diamonds before transfer
+    local diamondsBefore = countDiamondsInChest()
+    
+    -- Transfer diamonds from barrel to chest
+    for _, slot in ipairs(diamondSlots) do
+        barrel.pushItems(peripheral.getName(storageChest), slot)
+    end
+    
+    -- Count diamonds after transfer
+    local diamondsAfter = countDiamondsInChest()
+    
+    -- Calculate how many were deposited
+    local deposited = diamondsAfter - diamondsBefore
+    
+    -- Update the tally
+    atm.diamondTally = diamondsAfter
+    saveDiamondTally()
+    
+    return deposited
+end
+
+-- Helper: Transfer diamonds from chest to barrel for withdrawal
+local function processChestWithdrawal(diamondsNeeded)
+    local items = storageChest.list()
+    local transferred = 0
+    
+    -- Transfer diamonds from chest to barrel
+    for slot, item in pairs(items) do
+        if item.name == "minecraft:diamond" and transferred < diamondsNeeded then
+            local toTransfer = math.min(item.count, diamondsNeeded - transferred)
+            local actuallyTransferred = storageChest.pushItems(peripheral.getName(barrel), slot, toTransfer)
+            transferred = transferred + actuallyTransferred
+            
+            if transferred >= diamondsNeeded then
+                break
+            end
+        end
+    end
+    
+    -- Update the tally
+    atm.diamondTally = atm.diamondTally - transferred
+    saveDiamondTally()
+    
+    return transferred
+end
+
+-- Create Basalt UI on computer terminal
+local main = basalt.createFrame()
 
 -- Initialize state
 main:initializeState("currentScreen", "home")
-main:initializeState("monitoringBarrel", false)
 
--- Get terminal size (after setting text scale)
-local termWidth, termHeight
-if monitor then
-    termWidth, termHeight = monitor.getSize()
-else
-    termWidth, termHeight = term.getSize()
-end
+-- Get terminal size
+local termWidth, termHeight = term.getSize()
 
 -- Colors
 local colorBg = colors.gray
@@ -404,24 +393,42 @@ local homeFrame = main:addFrame()
     :setBackground(colorBg)
 
 homeFrame:addLabel()
-    :setText("TrainPass ATM")
-    :setPosition(1, 2)
+    :setText("TrainPass Deposit")
+    :setPosition(2, 2)
     :setForeground(colorPrimary)
 
 homeFrame:addLabel()
-    :setText("Machine: " .. atm.config.machineId)
-    :setPosition(1, 3)
-    :setForeground(colors.lightGray)
-
-homeFrame:addLabel()
     :setText("Please swipe your card")
-    :setPosition(1, 5)
+    :setPosition(2, 4)
     :setForeground(colorText)
 
 local statusLabel = homeFrame:addLabel()
     :setText(cardReader and "Ready" or "ERROR: No card reader!")
-    :setPosition(1, 7)
+    :setPosition(2, 6)
     :setForeground(cardReader and colorSuccess or colorError)
+
+homeFrame:addLabel()
+    :setText("Admin Login:")
+    :setPosition(2, termHeight - 4)
+    :setForeground(colorText)
+
+local adminPasswordInput = homeFrame:addInput({replaceChar="*"})
+    :setPosition(2, termHeight - 3)
+    :setSize(termWidth - 4, 1)
+    :setBackground(colors.black)
+    :setForeground(colors.white)
+
+local adminLoginBtn = homeFrame:addButton()
+    :setText("Exit")
+    :setPosition(2, termHeight - 1)
+    :setSize(10, 1)
+    :setBackground(colors.orange)
+    :setForeground(colors.white)
+
+local adminStatusLabel = homeFrame:addLabel()
+    :setText("")
+    :setPosition(13, termHeight - 1)
+    :setForeground(colorError)
 
 -- Menu Screen
 local menuFrame = main:addFrame()
@@ -443,23 +450,23 @@ local checkBalanceBtn = menuFrame:addButton()
     :setForeground(colors.white)
 
 local depositBtn = menuFrame:addButton()
-    :setText("Load Balance")
+    :setText("Deposit Diamonds")
     :setPosition(2, 5)
-    :setSize((termWidth-2), 1)
+    :setSize((termWidth-4), 3)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local withdrawBtn = menuFrame:addButton()
-    :setText("Withdraw")
-    :setPosition(2, 7)
-    :setSize((termWidth-2), 1)
+    :setText("Withdraw Diamonds")
+    :setPosition(2, 9)
+    :setSize((termWidth-4), 3)
     :setBackground(colorPrimary)
     :setForeground(colors.white)
 
 local logoutBtn = menuFrame:addButton()
     :setText("Logout")
-    :setPosition(2, 9)
-    :setSize((termWidth-2), 1)
+    :setPosition(2, 13)
+    :setSize((termWidth-4), 3)
     :setBackground(colorError)
     :setForeground(colors.white)
 
@@ -471,24 +478,24 @@ local depositFrame = main:addFrame()
     :setVisible(false)
 
 depositFrame:addLabel()
-    :setText("Load Balance")
+    :setText("Deposit Diamonds")
     :setPosition(2, 2)
     :setForeground(colorPrimary)
 
 depositFrame:addLabel()
-    :setText("Insert diamonds into barrel")
+    :setText("Put diamonds in barrel")
     :setPosition(2, 4)
     :setForeground(colorText)
 
-local depositCountLabel = depositFrame:addLabel()
-    :setText("Diamonds inserted: 0")
-    :setPosition(2, 6)
-    :setForeground(colors.yellow)
+depositFrame:addLabel()
+    :setText("then click Confirm")
+    :setPosition(2, 5)
+    :setForeground(colorText)
 
-local depositValueLabel = depositFrame:addLabel()
-    :setText("Value: 0")
+local depositStatusLabel = depositFrame:addLabel()
+    :setText("")
     :setPosition(2, 7)
-    :setForeground(colorSuccess)
+    :setForeground(colors.yellow)
 
 local depositConfirmBtn = depositFrame:addButton()
     :setText("Confirm Deposit")
@@ -516,37 +523,101 @@ withdrawFrame:addLabel()
     :setPosition(2, 2)
     :setForeground(colorPrimary)
 
-withdrawFrame:addLabel()
-    :setText("Enter number of diamonds:")
+local withdrawBalanceLabel = withdrawFrame:addLabel()
+    :setText("")
     :setPosition(2, 4)
+    :setForeground(colorSuccess)
+
+withdrawFrame:addLabel()
+    :setText("Diamonds to withdraw:")
+    :setPosition(2, 6)
     :setForeground(colorText)
 
 local withdrawInput = withdrawFrame:addInput()
-    :setPosition(2, 5)
-    :setSize(10, 1)
+    :setPosition(2, 7)
+    :setSize(termWidth-4, 1)
     :setBackground(colors.black)
     :setForeground(colors.white)
 
-local withdrawValueLabel = withdrawFrame:addLabel()
-    :setText("Cost: 0")
-    :setPosition(2, 7)
+local withdrawStatusLabel = withdrawFrame:addLabel()
+    :setText("")
+    :setPosition(2, 9)
     :setForeground(colors.yellow)
 
 local withdrawConfirmBtn = withdrawFrame:addButton()
-    :setText("Withdraw")
-    :setPosition(2, 10)
-    :setSize(12, 3)
+    :setText("Confirm")
+    :setPosition(2, 11)
+    :setSize(16, 3)
     :setBackground(colorSuccess)
     :setForeground(colors.white)
 
 local withdrawCancelBtn = withdrawFrame:addButton()
     :setText("Cancel")
-    :setPosition(15, 10)
+    :setPosition(19, 11)
     :setSize(10, 3)
     :setBackground(colorError)
     :setForeground(colors.white)
 
+-- Theft Alert Screen
+local theftFrame = main:addFrame()
+    :setPosition(1, 1)
+    :setSize(termWidth, termHeight)
+    :setBackground(colorError)
+    :setVisible(false)
+
+theftFrame:addLabel()
+    :setText("!!! THEFT ALERT !!!")
+    :setPosition(2, 3)
+    :setForeground(colors.white)
+
+local theftDetailsLabel = theftFrame:addLabel()
+    :setText("")
+    :setPosition(2, 5)
+    :setForeground(colors.white)
+
+theftFrame:addLabel()
+    :setText("Unauthorized diamond")
+    :setPosition(2, 7)
+    :setForeground(colors.white)
+
+theftFrame:addLabel()
+    :setText("removal detected!")
+    :setPosition(2, 8)
+    :setForeground(colors.white)
+
+theftFrame:addLabel()
+    :setText("Please contact an")
+    :setPosition(2, 10)
+    :setForeground(colors.white)
+
+theftFrame:addLabel()
+    :setText("administrator.")
+    :setPosition(2, 11)
+    :setForeground(colors.white)
+
 -- Event Handlers
+
+-- Admin Login
+adminLoginBtn:onClick(function()
+    local password = adminPasswordInput:getText()
+    
+    if password == atm.config.adminPassword then
+        -- Correct password - save authentication flag and terminate
+        local file = fs.open(".admin_authenticated", "w")
+        file.write("true")
+        file.close()
+        os.queueEvent("terminate")
+    else
+        -- Incorrect password
+        adminStatusLabel:setText("Incorrect password")
+        adminPasswordInput:setText("")
+        
+        basalt.schedule(function()
+            sleep(2)
+            adminStatusLabel:setText("")
+        end)
+    end
+end)
 
 -- Check Balance
 checkBalanceBtn:onClick(function(self)
@@ -563,153 +634,140 @@ checkBalanceBtn:onClick(function(self)
     end)
 end)
 
--- Timer for barrel monitoring
-local barrelMonitorTimer = nil
-
 -- Go to deposit screen
 depositBtn:onClick(function()
-    -- Clear any leftover items from barrel
-    clearBarrel()
-    
-    atm.diamondsInserted = 0
-    depositCountLabel:setText("Diamonds inserted: 0")
-    depositValueLabel:setText("Value: 0")
+    depositStatusLabel:setText("")
     
     menuFrame:setVisible(false)
     depositFrame:setVisible(true)
     main:setState("currentScreen", "deposit")
+end)
+
+-- Go to withdraw screen
+withdrawBtn:onClick(function()
+    withdrawStatusLabel:setText("")
+    withdrawInput:setText("")
     
-    -- Start monitoring barrel
-    main:setState("monitoringBarrel", true)
-    barrelMonitorTimer = os.startTimer(0.5)
+    -- Show diamonds available
+    local diamondsAvailable = math.floor(atm.currentBalance / atm.config.diamondValue)
+    withdrawBalanceLabel:setText("Diamonds available: " .. diamondsAvailable)
+    
+    menuFrame:setVisible(false)
+    withdrawFrame:setVisible(true)
+    main:setState("currentScreen", "withdraw")
 end)
 
 -- Confirm deposit
 depositConfirmBtn:onClick(function()
-    main:setState("monitoringBarrel", false)
-    
-    if barrelMonitorTimer then
-        os.cancelTimer(barrelMonitorTimer)
-        barrelMonitorTimer = nil
-    end
-    
-    depositCountLabel:setText("Processing items..."):setForeground(colors.yellow)
+    depositStatusLabel:setText("Processing..."):setForeground(colors.yellow)
     
     basalt.schedule(function()
-        -- Process items (move diamonds to dispenser, junk to chest)
-        local diamonds, junk = processBarrelItems()
-        
-        if junk > 0 then
-            depositValueLabel:setText(junk .. " junk item(s) rejected"):setForeground(colorError)
-            sleep(1)
-        end
+        -- Transfer diamonds from barrel to storage chest and count
+        local diamonds = processBarrelDeposit()
         
         if diamonds == 0 then
-            depositCountLabel:setText("No diamonds to deposit"):setForeground(colorError)
-            sleep(1)
+            depositStatusLabel:setText("No diamonds found"):setForeground(colorError)
+            sleep(2)
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
             return
         end
         
-        depositCountLabel:setText("Depositing " .. diamonds .. " diamonds..."):setForeground(colors.yellow)
+        depositStatusLabel:setText("Depositing " .. diamonds .. " diamonds..."):setForeground(colors.yellow)
         
         local success, balance = atm.processDeposit(atm.currentAccount, diamonds)
+        
         if success then
-            atm.currentBalance = balance
-            menuBalanceLabel:setText("Balance: " .. balance)
-            depositCountLabel:setText("Deposit successful!"):setForeground(colorSuccess)
-            sleep(1)
+            if balance then
+                atm.currentBalance = balance
+                menuBalanceLabel:setText("Balance: " .. balance)
+            end
+            depositStatusLabel:setText("Deposited +" .. (diamonds * atm.config.diamondValue)):setForeground(colorSuccess)
+            sleep(2)
             
             depositFrame:setVisible(false)
             menuFrame:setVisible(true)
             main:setState("currentScreen", "menu")
         else
-            depositCountLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
+            local errorMsg = tostring(balance or "Unknown error")
+            depositStatusLabel:setText("Error: " .. errorMsg):setForeground(colorError)
         end
     end)
 end)
 -- Cancel deposit
 depositCancelBtn:onClick(function()
-    main:setState("monitoringBarrel", false)
-    
-    if barrelMonitorTimer then
-        os.cancelTimer(barrelMonitorTimer)
-        barrelMonitorTimer = nil
-    end
-    
-    -- Return all items from barrel to junk chest
-    clearBarrel()
-    
-    atm.diamondsInserted = 0
     depositFrame:setVisible(false)
     menuFrame:setVisible(true)
     main:setState("currentScreen", "menu")
 end)
 
--- Go to withdraw screen
-withdrawBtn:onClick(function()
-    withdrawInput:setValue("")
-    withdrawValueLabel:setText("Cost: 0")
-    menuFrame:setVisible(false)
-    withdrawFrame:setVisible(true)
-    main:setState("currentScreen", "withdraw")
-end)
-
--- Update withdraw cost
-withdrawInput:onChange(function(self)
-    local diamonds = tonumber(self:getValue()) or 0
-    local cost = diamonds * atm.config.diamondValue
-    withdrawValueLabel:setText("Cost: " .. cost)
-end)
-
 -- Confirm withdrawal
 withdrawConfirmBtn:onClick(function()
-    local diamonds = tonumber(withdrawInput:getValue()) or 0
-    if diamonds <= 0 then
+    local diamondsStr = withdrawInput:getText()
+    local diamonds = math.floor(tonumber(diamondsStr) or 0)
+    
+    if not diamonds or diamonds <= 0 then
+        withdrawStatusLabel:setText("Invalid amount"):setForeground(colorError)
         return
     end
     
-    local cost = diamonds * atm.config.diamondValue
-    if cost > atm.currentBalance then
-        withdrawValueLabel:setText("Insufficient funds!"):setForeground(colorError)
+    local diamondsAvailable = math.floor(atm.currentBalance / atm.config.diamondValue)
+    if diamonds > diamondsAvailable then
+        withdrawStatusLabel:setText("Not enough diamonds"):setForeground(colorError)
         return
     end
     
-    withdrawValueLabel:setText("Processing..."):setForeground(colors.yellow)
+    withdrawStatusLabel:setText("Processing..."):setForeground(colors.yellow)
     
     basalt.schedule(function()
-        local success, balance = atm.processWithdrawal(atm.currentAccount, diamonds)
-        if success then
-            atm.currentBalance = balance
-            menuBalanceLabel:setText("Balance: " .. balance)
-            
-            -- Move diamonds from dispenser to junk chest for pickup
-            local dispensed = 0
-            for slot = 1, diamondDispenser.size() do
-                local item = diamondDispenser.getItemDetail(slot)
-                if item and isDiamond(item.name) then
-                    local toMove = math.min(item.count, diamonds - dispensed)
-                    if toMove > 0 then
-                        diamondDispenser.pushItems(peripheral.getName(junkChest), slot, toMove)
-                        dispensed = dispensed + toMove
-                        if dispensed >= diamonds then
-                            break
-                        end
-                    end
-                end
-            end
-            
-            withdrawValueLabel:setText("Collect your diamonds!"):setForeground(colorSuccess)
-            sleep(2)
-            
-            withdrawFrame:setVisible(false)
-            menuFrame:setVisible(true)
-            main:setState("currentScreen", "menu")
-        else
-            withdrawValueLabel:setText("Error: " .. tostring(balance)):setForeground(colorError)
+        -- Check how many diamonds are actually in storage
+        local diamondsInStorage = countDiamondsInChest()
+        local diamondsToWithdraw = math.min(diamonds, diamondsInStorage)
+        
+        if diamondsToWithdraw == 0 then
+            withdrawStatusLabel:setText("Error: No diamonds in storage"):setForeground(colorError)
+            return
         end
+        
+        -- Calculate amount to deduct based on what we can actually give
+        local amount = diamondsToWithdraw * atm.config.diamondValue
+        
+        -- Deduct from account (send as negative)
+        local success, newBalance = atm.processWithdrawal(atm.currentAccount, -amount)
+        
+        if not success then
+            local errorMsg = tostring(newBalance or "Unknown error")
+            withdrawStatusLabel:setText("Error: " .. errorMsg):setForeground(colorError)
+            return
+        end
+        
+        -- Transfer diamonds from chest to barrel
+        local transferred = processChestWithdrawal(diamondsToWithdraw)
+        
+        if transferred < diamondsToWithdraw then
+            withdrawStatusLabel:setText("Error: Transfer failed"):setForeground(colorError)
+            -- TODO: Should reverse the withdrawal transaction here
+            return
+        end
+        
+        -- Update balance
+        if newBalance then
+            atm.currentBalance = newBalance
+            menuBalanceLabel:setText("Balance: " .. newBalance)
+        end
+        
+        -- Show appropriate message
+        if diamondsToWithdraw < diamonds then
+            withdrawStatusLabel:setText("Partial: " .. diamondsToWithdraw .. "/" .. diamonds .. " diamonds"):setForeground(colors.orange)
+        else
+            withdrawStatusLabel:setText("Withdrawn " .. diamondsToWithdraw .. " diamonds"):setForeground(colorSuccess)
+        end
+        sleep(2)
+        
+        withdrawFrame:setVisible(false)
+        menuFrame:setVisible(true)
+        main:setState("currentScreen", "menu")
     end)
 end)
 
@@ -728,26 +786,6 @@ logoutBtn:onClick(function()
     menuFrame:setVisible(false)
     homeFrame:setVisible(true)
     main:setState("currentScreen", "home")
-end)
-
--- Register timer event for barrel monitoring
-basalt.onEvent("timer", function(timerId)
-    if timerId == barrelMonitorTimer then
-        local monitoring = main:getState("monitoringBarrel")
-        
-        if monitoring and main:getState("currentScreen") == "deposit" then
-            -- Count diamonds in barrel
-            local diamonds = countDiamondsInBarrel()
-            
-            -- Update display
-            depositCountLabel:setText("Diamonds in barrel: " .. diamonds)
-            depositValueLabel:setText("Value: " .. (diamonds * atm.config.diamondValue))
-                :setForeground(diamonds > 0 and colors.green or colorText)
-            
-            -- Restart timer
-            barrelMonitorTimer = os.startTimer(0.5)
-        end
-    end
 end)
 
 -- Register custom event for card_read
@@ -830,4 +868,109 @@ end)
 
 
 -- Start Basalt (it will handle all events automatically)
+-- Initialize diamond tally on startup
+local savedTally = loadDiamondTally()
+if savedTally then
+    atm.diamondTally = savedTally
+    print("Loaded diamond tally from disk: " .. atm.diamondTally)
+else
+    atm.diamondTally = countDiamondsInChest()
+    saveDiamondTally()
+    print("Initial diamond tally: " .. atm.diamondTally)
+end
+
+basalt.schedule(function()
+    -- Background task to blink redstone when storage is empty and detect theft
+    local previousScreen = nil
+    local theftDetected = false
+    
+    while true do
+        local diamondsInStorage = countDiamondsInChest()
+        
+        -- Check for theft (diamonds removed without proper withdrawal)
+        if diamondsInStorage ~= atm.diamondTally then
+            local difference = diamondsInStorage - atm.diamondTally
+            local moreOrLess = difference > 0 and "more" or "less"
+            local absDiff = math.abs(difference)
+            
+            -- Show theft alert screen
+            if not theftDetected then
+                previousScreen = main:getState("currentScreen")
+                theftDetected = true
+                
+                -- Hide all other screens
+                homeFrame:setVisible(false)
+                menuFrame:setVisible(false)
+                depositFrame:setVisible(false)
+                withdrawFrame:setVisible(false)
+                
+                -- Show theft alert
+                theftFrame:setVisible(true)
+                main:setState("currentScreen", "theft")
+            end
+            
+            -- Update the theft details label continuously
+            theftDetailsLabel:setText(diamondsInStorage .. " diamonds found, " .. absDiff .. " " .. moreOrLess .. " than expected!")
+            
+            -- Sound alarm - diamonds don't match expected!
+            if cardReader then
+                cardReader.beep(440)
+                cardReader.setLight("RED",true)
+            end
+            sleep(0.15)
+            cardReader.setLight("RED",false)
+            sleep(0.15)
+        elseif diamondsInStorage == 0 then
+            -- Clear theft alert and restore previous screen
+            if theftDetected then
+                theftFrame:setVisible(false)
+                theftDetected = false
+                
+                -- Restore previous screen
+                if previousScreen == "home" then
+                    homeFrame:setVisible(true)
+                elseif previousScreen == "menu" then
+                    menuFrame:setVisible(true)
+                elseif previousScreen == "deposit" then
+                    depositFrame:setVisible(true)
+                elseif previousScreen == "withdraw" then
+                    withdrawFrame:setVisible(true)
+                else
+                    homeFrame:setVisible(true)
+                end
+                main:setState("currentScreen", previousScreen or "home")
+            end
+            
+            -- Blink redstone on the right when empty
+            redstone.setOutput("right", true)
+            sleep(0.5)
+            redstone.setOutput("right", false)
+            sleep(0.5)
+        else
+            -- Clear theft alert and restore previous screen
+            if theftDetected then
+                theftFrame:setVisible(false)
+                theftDetected = false
+                
+                -- Restore previous screen
+                if previousScreen == "home" then
+                    homeFrame:setVisible(true)
+                elseif previousScreen == "menu" then
+                    menuFrame:setVisible(true)
+                elseif previousScreen == "deposit" then
+                    depositFrame:setVisible(true)
+                elseif previousScreen == "withdraw" then
+                    withdrawFrame:setVisible(true)
+                else
+                    homeFrame:setVisible(true)
+                end
+                main:setState("currentScreen", previousScreen or "home")
+            end
+            
+            redstone.setOutput("right", true)
+            sleep(2)
+        end
+    end
+end)
+
 basalt.run()

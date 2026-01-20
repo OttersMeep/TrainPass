@@ -7,6 +7,7 @@
 local ecc = require("ecc")
 
 local gateway = {}
+openTempChannels = {}
 
 -- Modems
 gateway.wiredModem = nil
@@ -20,7 +21,8 @@ gateway.publicKey = nil
 gateway.wirelessChannel = 1000 -- External channel for wireless clients
 gateway.wiredChannel = 105 -- Gateway's internal wired channel
 gateway.balanceManagerChannel = 101 -- Balance manager's channel
-gateway.ledgerChannel = 100
+gateway.ledgerChannel = 100 -- Ledger Channel
+gateway.keyGenChannel = 102 -- This is where we do keygen
 
 -- Machine registry (machineId -> publicKey)
 gateway.depositMachines = {} 
@@ -187,12 +189,61 @@ end
 
 -- Helper: Send request to balance manager using ephemeral channel for concurrency
 -- This ensures that responses go to the correct thread
+function gateway.sendToKeyServer(request)
+    local tempChannel = math.random(20000, 65000)
+    -- Ensure channel is not one of our main ones
+    while tempChannel == gateway.wiredChannel or tempChannel == gateway.wirelessChannel or openTempChannels[tempChannel]==1 do
+        tempChannel = math.random(20000, 65000)
+    end
+    openTempChannels[tempChannel]=1
+    
+    print("DEBUG [Gateway]: Opening temp channel " .. tempChannel .. " for request " .. request.action)
+    gateway.wiredModem.open(tempChannel)
+    
+    -- Verify channel is open
+    if not gateway.wiredModem.isOpen(tempChannel) then
+        print("ERROR [Gateway]: Failed to open temp channel " .. tempChannel)
+    end
+    
+    gateway.wiredModem.transmit(
+        gateway.keyGenChannel,
+        tempChannel,
+        textutils.serialize(request)
+    )
+    
+    local timer = os.startTimer(30)
+    local response = nil
+    
+    print("DEBUG [Gateway]: Waiting for response on " .. tempChannel)
+    
+    while true do
+        local event, side, channel, replyChannel, message = os.pullEvent()
+        
+        if event == "modem_message" then
+            print("DEBUG [Gateway]: Thread saw message on " .. tostring(channel))
+            if channel == tempChannel then
+                print("DEBUG [Gateway]: Received response on temp channel " .. tempChannel)
+                response = textutils.unserialize(message)
+                break
+            end
+        elseif event == "timer" and side == timer then
+            print("DEBUG [Gateway]: Timeout waiting for response on " .. tempChannel)
+            break -- Timeout, response remains nil
+        end
+        print(event)
+    end
+    openTempChannels[tempChannel]=nil
+    gateway.wiredModem.close(tempChannel)
+    return response
+end
+
 function gateway.sendToBalanceManager(request)
     local tempChannel = math.random(20000, 65000)
     -- Ensure channel is not one of our main ones
-    while tempChannel == gateway.wiredChannel or tempChannel == gateway.wirelessChannel do
+    while tempChannel == gateway.wiredChannel or tempChannel == gateway.wirelessChannel or openTempChannels[tempChannel]==1 do
         tempChannel = math.random(20000, 65000)
     end
+    openTempChannels[tempChannel]=1
     
     print("DEBUG [Gateway]: Opening temp channel " .. tempChannel .. " for request " .. request.action)
     gateway.wiredModem.open(tempChannel)
@@ -229,10 +280,11 @@ function gateway.sendToBalanceManager(request)
         end
         print(event)
     end
-    
+    openTempChannels[tempChannel]=nil
     gateway.wiredModem.close(tempChannel)
     return response
 end
+
 
 -- Handle deposit request from wireless
 function gateway.handleDepositRequest(data, replyChannel, machineId)
@@ -354,6 +406,30 @@ function gateway.handleGetAccountByCard(data, replyChannel, machineId)
         gateway.sendWireless(replyChannel, {
             success = false,
             error = response and response.error or "Card not registered"
+        }, machineId)
+    end
+end
+/*
+    elseif request.action == "GET_UNICARD_KEY" then
+        return {
+            success = true,
+            publicKey = publicKey,
+            allowedFields = allowed
+        }
+*/
+
+-- Handle UNICARD key request
+function gateway.handleKeyReq(data, replyChannel, machineId)
+    
+    local request = { action = "GET_UNICARD_KEY"}
+    local response = gateway.sendToBalanceManager(request)
+    
+    if response and response.success and response.publicKey then
+        gateway.sendWireless(replyChannel, response, machineId)
+    else
+        gateway.sendWireless(replyChannel, {
+            success = false,
+            error = response and response.error or "Error retrieving key"
         }, machineId)
     end
 end
@@ -565,6 +641,8 @@ function gateway.handleWirelessMessage(message, replyChannel)
         gateway.handleGetAccount(data, replyChannel, machineId)
     elseif data.requestType == "LOGIN" then
         gateway.handleLogin(data, replyChannel, machineId)
+    elseif data.requestType == "GET_UNICARD_KEY"
+        gateway.handleKeyReq(data, replyChannel, machineId)
     else
         print("DEBUG [Gateway]: Unknown request type")
         gateway.sendWireless(replyChannel, { success = false, error = "Unknown request type" }, machineId)
