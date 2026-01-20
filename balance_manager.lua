@@ -554,4 +554,7 @@ function balanceManager.run()
     end
 end
 
+balanceManager.init()
+balanceManager.run()
+
 return balanceManager
