@@ -57,6 +57,10 @@ if fs.exists("deposit_machine_client.lua") then
                 os.shutdown()
             end
         else
+            if config.testing then
+                print("Exited cleanly in testing mode - returning to shell")
+                break
+            end
             -- Unauthorized termination - shutdown computer
             term.clear()
             term.setCursorPos(1, 1)

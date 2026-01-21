@@ -412,9 +412,8 @@ end
 
 -- Handle UNICARD key request
 function gateway.handleKeyReq(data, replyChannel, machineId)
-    
-    local request = { action = "GET_UNICARD_KEY"}
-    local response = gateway.sendToBalanceManager(request)
+    local request = { action = "GET_UNICARD_KEY" }
+    local response = gateway.sendToKeyServer(request)
     
     if response and response.success and response.publicKey then
         gateway.sendWireless(replyChannel, response, machineId)

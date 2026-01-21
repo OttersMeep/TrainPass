@@ -10,9 +10,9 @@ if not fs.exists("basalt.lua") then
     end
 end
 
+local unicard = require('unicard')
 local ecc = require("ecc")
 local basalt = require("basalt")
-local unicard = require("unicard")
 
 local portal = {}
 
@@ -96,11 +96,6 @@ end
 -- Generate unique response channel
 portal.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(portal.config.responseChannel)
-
--- Initialize UniCard client
-portal.sendRequest({requestType="GET_UNICARD_KEY"})
-unicard.init(portal.config.privateKey, ecc.publicKey(portal.config.privateKey))
-print("UniCard client initialized")
 
 -- State
 portal.currentUser = nil
@@ -729,7 +724,9 @@ end)
 addUnicardBtn:onClick(function()
     menuFrame:setVisible(false)
     addCardFrame:setVisible(true)
-    addCardStatusLabel:setText("Tap your UniCard..."):setForeground(colors.yellow)
+    main:setState("cardNickname", "")
+    addCardNicknameInput:setText("")
+    addCardStatusLabel:setText("Enter nickname, then tap your UniCard"):setForeground(colors.yellow)
     addCardStartBtn:setVisible(false)
     main:setState("currentScreen", "add_existing_unicard")
 end)
@@ -925,39 +922,49 @@ basalt.onEvent("card_read", function(info)
                 end)
             end
         elseif screen == "add_existing_unicard" then
-            -- Add UniCard: Read account ID from UniCard and add to account
+            -- Add existing UniCard: read UUID, ensure unclaimed, claim to this account
             local cardUUID = info.data
             local currentAccount = main:getState("currentAccount")
+            local nickname = main:getState("cardNickname") or ""
+            
+            if nickname == "" then
+                addCardStatusLabel:setText("Enter a nickname before tapping"):setForeground(colorError)
+                cardReader.beep(500)
+                return
+            end
             
             portal.log("Reading UniCard with UUID: " .. tostring(cardUUID))
             addCardStatusLabel:setText("Reading UniCard..."):setForeground(colors.yellow)
             
             basalt.schedule(function()
-                -- Read account ID from UniCard
-                local accountId, err = unicard.getKey("pasmo_account_id", cardUUID)
-                
-                if not accountId then
-                    addCardStatusLabel:setText("Not a PASMO UniCard"):setForeground(colorError)
+                -- Read current owner from UniCard
+                local existingAccountId, err = unicard.getKey("pasmo_account_id", cardUUID)
+
+                -- If already claimed by anyone, block
+                if existingAccountId ~= nil then
+                    addCardStatusLabel:setText("UniCard already owned by another account"):setForeground(colorError)
                     sleep(2)
                     addCardFrame:setVisible(false)
                     menuFrame:setVisible(true)
                     main:setState("currentScreen", "menu")
                     return
                 end
-                
-                -- Verify it matches current account
-                if accountId ~= currentAccount.accountId then
-                    addCardStatusLabel:setText("Card belongs to different account"):setForeground(colorError)
+
+                -- Claim the card for this account (field was empty/nil)
+                addCardStatusLabel:setText("Claiming UniCard..."):setForeground(colors.yellow)
+                local claimOk, claimErr = unicard.setKey("pasmo_account_id", currentAccount.accountId, cardUUID)
+                if not claimOk then
+                    addCardStatusLabel:setText("Claim failed: " .. tostring(claimErr)):setForeground(colorError)
                     sleep(2)
                     addCardFrame:setVisible(false)
                     menuFrame:setVisible(true)
                     main:setState("currentScreen", "menu")
                     return
                 end
-                
+
                 -- Add card to account (generates default nickname)
                 addCardStatusLabel:setText("Adding UniCard..."):setForeground(colors.yellow)
-                local success, err2 = portal.addCard(currentAccount.accountId, cardUUID, "UniCard")
+                local success, err2 = portal.addCard(currentAccount.accountId, cardUUID, nickname)
                 
                 if success then
                     addCardStatusLabel:setText("UniCard added!"):setForeground(colorSuccess)
@@ -983,24 +990,31 @@ basalt.onEvent("card_read", function(info)
                     main:setState("currentScreen", "menu")
                 end
             end)
-                            menuCardsLabel:setText("Cards: " .. (account.cards and #account.cards or #account.cardUUIDs))
-                        end
-                        
-                        os.sleep(2)
-                        main:setState("pendingCardUUID", nil)
-                        addCardFrame:setVisible(false)
-                        menuFrame:setVisible(true)
-                        main:setState("currentScreen", "menu")
-                    else
-                        addCardStatusLabel:setText("Error: " .. tostring(err)):setForeground(colorError)
-                        cardReader.beep(500)
-                    end
-                end)
-            end
         end
     end
 end)
 
+function uniCardInit()
+    local timestamp = os.epoch("utc")
+
+    portal.sendRequest({
+        data = {
+            requestType = "GET_UNICARD_KEY",
+            timestamp = timestamp
+        },
+        timestamp = timestamp
+    })
+
+    local response, err = portal.waitForResponse(10)
+
+    if response and response.success then
+        unicard.init(response.privateKey, response.publicKey, 200, "pasmo")
+    else
+        print(textutils.serialize(response))
+        error("BAD RESPONSE")
+    end
+end
+uniCardInit()
 
 -- Start Basalt (it will handle all events automatically)
 basalt.run()

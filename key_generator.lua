@@ -3,17 +3,16 @@
 -- Connected via wired modem to other servers
 
 local keyGenerator = {}
+local serviceName = "pasmo"
 
 -- Wired modem
 keyGenerator.modem = nil
-keyGenerator.serverChannel =  -- Internal server channel
+keyGenerator.serverChannel = 102 -- Internal server channel
 
 -- Key storage
 keyGenerator.generatedKeys = {} -- History of generated keys
 keyGenerator.unicardService = nil -- Single UniCard service keypair metadata (public, allowedKeys)
 keyGenerator.unicardPrivateKey = nil -- Loaded from disk (never serialized to data file)
-
-loadedPub, loadedPriv = loadUniCardKeypairFromDisk()
 
 -- Disk helpers for UniCard keypair
 local function findDiskDrive()
@@ -21,16 +20,20 @@ local function findDiskDrive()
 end
 
 local function loadUniCardKeypairFromDisk()
-    local driveName = findDiskDrive()
-    if not driveName or not disk.isPresent(driveName) then
+    local drive = findDiskDrive()
+    if not drive then
+        return nil, nil, "No disk present"
+    end
+    local driveName = peripheral.getName(drive)
+    if not disk.isPresent(driveName) then
         return nil, nil, "No disk present"
     end
     local mount = disk.getMountPath(driveName)
     if not mount then
         return nil, nil, "Disk not mounted"
     end
-    local pubPath = fs.combine(mount, "unicard_public.key")
-    local privPath = fs.combine(mount, "unicard_private.key")
+    local pubPath = fs.combine(mount, "uc_server_public.key")
+    local privPath = fs.combine(mount, serviceName .. "_private.key")
     if not (fs.exists(pubPath) and fs.exists(privPath)) then
         return nil, nil, "Key files not found on disk"
     end
@@ -107,11 +110,24 @@ function keyGenerator.handleRequest(message)
             privateKey = keys.privateKey
         }
     elseif request.action == "GET_UNICARD_KEY" then
+        -- Ensure we have the UniCard keypair loaded (from disk-only storage)
+        if not keyGenerator.unicardService or not keyGenerator.unicardPrivateKey then
+            local pub, priv, err = loadUniCardKeypairFromDisk()
+            if not (pub and priv) then
+                return { success = false, error = "UniCard keypair missing on disk: " .. tostring(err) }
+            end
+            keyGenerator.unicardPrivateKey = priv
+            keyGenerator.unicardService = keyGenerator.unicardService or {}
+            keyGenerator.unicardService.publicKey = pub
+            keyGenerator.unicardService.allowedKeys = keyGenerator.unicardService.allowedKeys or {}
+            keyGenerator.unicardService.createdAt = keyGenerator.unicardService.createdAt or os.epoch("utc")
+        end
+
         return {
             success = true,
-            publicKey = publicKey,
-            privateKey = privateKey
-            allowedFields = allowed
+            publicKey = keyGenerator.unicardService.publicKey,
+            privateKey = keyGenerator.unicardPrivateKey,
+            allowedFields = keyGenerator.unicardService.allowedKeys or {}
         }
     end
     
@@ -156,7 +172,7 @@ function keyGenerator.load(filename)
         if not keyGenerator.unicardService then
             keyGenerator.unicardService = {
                 publicKey = pub,
-                privateKey = priv
+                privateKey = priv,
                 allowedKeys = {},
                 createdAt = os.epoch("utc")
             }
@@ -188,5 +204,8 @@ function keyGenerator.run()
         end
     end
 end
+loadedPub, loadedPriv = loadUniCardKeypairFromDisk()
+keyGenerator.init()
+keyGenerator.run()
 
 return keyGenerator

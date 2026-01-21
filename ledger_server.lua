@@ -196,4 +196,7 @@ function ledger.run()
     end
 end
 
+ledger.init()
+ledger.run()
+
 return ledger

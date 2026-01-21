@@ -9,21 +9,6 @@ local unicardServer = {}
 unicardServer.storage = {}   -- cardUUID -> { key -> { value, ownerPublicKey, createdAt, updatedAt } }
 unicardServer.services = {}  -- serviceId -> { publicKey, allowedKeys, createdAt }
 
-local function serializePublicKey(pk)
-    return pk and textutils.serialize(pk) or nil
-end
-
-local function findServiceByPublicKey(publicKey)
-    local needle = serializePublicKey(publicKey)
-    if not needle then return nil, nil end
-    for id, svc in pairs(unicardServer.services) do
-        if serializePublicKey(svc.publicKey) == needle then
-            return id, svc
-        end
-    end
-    return nil, nil
-end
-
 -- Configuration
 unicardServer.config = {
     serverChannel = 200,
@@ -52,13 +37,15 @@ function unicardServer.init(serverChannel)
     
     -- Save keypair
     local file = fs.open("server_keys.dat", "w")
-    if file
+    if file then
         file.write(textutils.serialize({
             privateKey = unicardServer.privateKey,
             publicKey = unicardServer.publicKey
         }))
         file.close()
         print("Gateway keypair saved")
+    end
+
     end
 
     unicardServer.config.serverChannel = serverChannel or 200
@@ -116,77 +103,21 @@ function unicardServer.load()
     return false
 end
 
--- Verify request signature
-local function verifySignature(request)
-    if not request.signature or not request.publicKey or not request.timestamp then
-        return false, "Missing signature, publicKey, or timestamp"
-    end
-    
-    -- Reconstruct the signed data
-    local signatureData = textutils.serialize({
-        requestType = request.requestType,
-        cardUUID = request.cardUUID,
-        key = request.key,
-        timestamp = request.timestamp
-    })
-    
-    -- Verify signature
-    local valid = ecc.verify(request.publicKey, signatureData, request.signature)
-    
-    if not valid then
-        return false, "Invalid signature"
-    end
-    
-    return true, nil
-end
-
--- Check if public key owns a specific key on a card and is allowed for this service
-local function checkOwnership(cardUUID, key, publicKey)
-    local serviceId, service = findServiceByPublicKey(publicKey)
-    if not serviceId then
-        return false, "Service not registered"
-    end
-
-    local allowed = false
-    for _, k in ipairs(service.allowedKeys or {}) do
-        if k == key then
-            allowed = true
-            break
-        end
-    end
-    if not allowed then
-        return false, "Field not allowed for this service"
-    end
-
-    if not unicardServer.storage[cardUUID] then
-        return true
-    end
-    
-    local cardData = unicardServer.storage[cardUUID]
-    if not cardData[key] then
-        return true
-    end
-    
-    local ownerSerialized = serializePublicKey(cardData[key].ownerPublicKey)
-    local requesterSerialized = serializePublicKey(publicKey)
-    
-    if ownerSerialized ~= requesterSerialized then
-        return false, "Field owned by different service"
-    end
-    return true
-end
-
 -- Handle GET_KEY request
-local function handleGetField(request)
+local function handleGetField(serviceId,request)
     local cardUUID = request.cardUUID
     local key = request.key
+    local ok, ownershipErr = checkOwnership(serviceId,key)
+    if not ok then
+        return { success = false, error = ownershipErr or "Access denied" }
+    end
     
     if not unicardServer.storage[cardUUID] then
         return { success = false, error = "Card not found" }
     end
     
     if not unicardServer.storage[cardUUID][key] then
-        return { success = false, error = "Key not found" }
+        return { success = false, error = "Field not set" }
     end
     
     local data = unicardServer.storage[cardUUID][key]
@@ -197,14 +128,28 @@ local function handleGetField(request)
     }
 end
 
+local function checkOwnership(serviceId, fieldName)
+    serviceId = tostring(serviceId or "")
+    local svc = unicardServer.services[serviceId]
+    if not svc then
+        return false, "Service not found"
+    end
+    local allowed = svc.allowedKeys or {}
+    for _, k in ipairs(allowed) do
+        if k == fieldName then
+            return true, nil
+        end
+    end
+    return false, "Field not allowed for this service"
+end
+
 -- Handle SET_KEY request
-local function handleSetField(request)
+local function handleSetField(serviceId,request) -- REWRITE
     local cardUUID = request.cardUUID
     local key = request.key
     local value = request.value
-    local publicKey = request.publicKey
     
-    local ok, ownershipErr = checkOwnership(cardUUID, key, publicKey)
+    local ok, ownershipErr = checkOwnership(serviceId,key)
     if not ok then
         return { success = false, error = ownershipErr or "Access denied" }
     end
@@ -217,7 +162,6 @@ local function handleSetField(request)
     -- Store the key
     unicardServer.storage[cardUUID][key] = {
         value = value,
-        ownerPublicKey = publicKey,
         createdAt = unicardServer.storage[cardUUID][key] and unicardServer.storage[cardUUID][key].createdAt or os.epoch("utc"),
         updatedAt = os.epoch("utc")
     }
@@ -229,10 +173,13 @@ local function handleSetField(request)
 end
 
 -- Handle DELETE_KEY request
-local function handleDeleteField(request)
+local function handleDeleteField(serviceId,request) -- REWRITE
     local cardUUID = request.cardUUID
     local key = request.key
-    local publicKey = request.publicKey
+    local ok, ownershipErr = checkOwnership(serviceId,key)
+    if not ok then
+        return { success = false, error = ownershipErr or "Access denied" }
+    end
     
     if not unicardServer.storage[cardUUID] then
         return { success = false, error = "Card not found" }
@@ -240,11 +187,6 @@ local function handleDeleteField(request)
     
     if not unicardServer.storage[cardUUID][key] then
         return { success = false, error = "Key not found" }
-    end
-    
-    local ok, ownershipErr = checkOwnership(cardUUID, key, publicKey)
-    if not ok then
-        return { success = false, error = ownershipErr or "Access denied" }
     end
     
     -- Delete the key
@@ -284,15 +226,6 @@ end
 
 -- Handle incoming request
 local function handleRequest(request, replyChannel)
-    -- Verify signature
-    local valid, err = verifySignature(request)
-    if not valid then
-        return {
-            success = false,
-            error = err or "Signature verification failed"
-        }
-    end
-    
     -- Route to appropriate handler
     if request.requestType == "GET_FIELD" then
         return handleGetField(request)
@@ -336,10 +269,11 @@ local function mergeFields(existing, newFields)
 end
 
 local function saveKeypairToDisk(serviceId, privateKey, publicKey)
-    local driveName = peripheral.find("drive")
-    if not driveName then
+    local drive = peripheral.find("drive")
+    if not drive then
         return false, "No disk drive found"
     end
+    local driveName = peripheral.getName(drive)
     if not disk.isPresent(driveName) then
         return false, "No disk inserted"
     end
@@ -349,7 +283,7 @@ local function saveKeypairToDisk(serviceId, privateKey, publicKey)
     end
 
     local base = fs.combine(mount, serviceId)
-    local pubPath = "uc_server_public.key"
+    local pubPath = mount .. "/uc_server_public.key"
     local privPath = base .. "_private.key"
 
     local pubFile = fs.open(pubPath, "w")
@@ -367,8 +301,10 @@ local function saveKeypairToDisk(serviceId, privateKey, publicKey)
 end
 
 local function deleteKeypairFromDisk(serviceId)
-    local driveName = peripheral.find("drive")
-    if not driveName or not disk.isPresent(driveName) then return end
+    local drive = peripheral.find("drive")
+    if not drive then return end
+    local driveName = peripheral.getName(drive)
+    if not disk.isPresent(driveName) then return end
     local mount = disk.getMountPath(driveName)
     if not mount then return end
     local base = fs.combine(mount, serviceId)
@@ -497,13 +433,15 @@ local function runServerLoop()
         local event, side, channel, replyChannel, message = os.pullEvent("modem_message")
         if channel == unicardServer.config.serverChannel then
             local request = textutils.unserialize(message)
-            if request then
-                local response = handleRequest(request, replyChannel)
-                unicardServer.config.modem.transmit(
-                    replyChannel,
-                    unicardServer.config.serverChannel,
-                    textutils.serialize(response)
-                )
+            if request.serviceId then
+                print(request.serviceId)
+                print(textutils.serialise(unicardServer.services))
+                service = unicardServer.services[request.serviceId]
+                decryption = ecc.exchange(unicardServer.privateKey,service.publicKey)
+                packet = ecc.decrypt(request.encryptedData,decryption)
+                print(packet)
+                local response = handleRequest(packet,replyChannel)
+                unicardServer.config.modem.transmit(replyChannel,channel,textutils.serialise({success = true, encryptedData = ecc.encrypt(textutils.serialize(response),decryption)}))
             end
         end
     end

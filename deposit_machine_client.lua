@@ -109,9 +109,6 @@ end
 atm.config.responseChannel = 3000 + math.random(1, 6999)
 modem.open(atm.config.responseChannel)
 
--- Initialize UniCard client
-unicard.init(atm.config.privateKey, ecc.publicKey(atm.config.privateKey))
-print("UniCard client initialized")
 
 -- State
 atm.currentAccount = nil
@@ -972,5 +969,27 @@ basalt.schedule(function()
         end
     end
 end)
+
+-- Initialize UniCard client
+function initUnicard()
+    local timestamp = os.epoch("utc")
+
+    atm.sendRequest({
+        data = {
+            requestType = "GET_UNICARD_KEY",
+            timestamp = timestamp
+        },
+        timestamp = timestamp
+    })
+
+    local keys, err = atm.waitForResponse(10)
+
+    if keys and keys.success then
+        unicard.init(keys.privateKey, keys.publicKey)
+        print("UniCard client initialized")
+    else
+        error((keys and keys.error) or err or "Failed to initialize UniCard client")
+    end
+end
 
 basalt.run()
