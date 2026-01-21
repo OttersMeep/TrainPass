@@ -1,10 +1,8 @@
--- Key Generator Server - Keypair Generation
--- Generates ECC keypairs for new accounts
--- Connected via wired modem to other servers
-
-local keyGenerator = {}
+-- Modify this if you're making your own system
 local serviceName = "pasmo"
 
+
+local keyGenerator = {}
 -- Wired modem
 keyGenerator.modem = nil
 keyGenerator.serverChannel = 102 -- Internal server channel

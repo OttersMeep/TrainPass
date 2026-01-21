@@ -1,3 +1,7 @@
+-- IMPORTANT- THESE ARE THE VARIABLES TO MODIFY IF YOU WANT TO REPURPOSE THIS SYSTEM
+
+fieldName = "pasmo_account_id" -- This is the unicard field you'll be using
+serviceId = "pasmo" -- This is the name of your UniCard service
 
 local ecc = require("ecc")
 local unicard = require("unicard")
@@ -184,10 +188,9 @@ end
 -- Look up account by card UUID using UniCard
 function atm.getAccountByCard(cardUUID)
     -- Read account ID from UniCard server
-    local accountId, err = unicard.getKey("pasmo_account_id", cardUUID)
-    
+    local accountId, err = unicard.getKey(fieldName, cardUUID)
     if not accountId then
-        return false, "Card not registered with PASMO"
+        return false, err
     end
     
     return true, accountId
@@ -864,8 +867,6 @@ basalt.onEvent("card_read", function(info)
 end)
 
 
--- Start Basalt (it will handle all events automatically)
--- Initialize diamond tally on startup
 local savedTally = loadDiamondTally()
 if savedTally then
     atm.diamondTally = savedTally
@@ -875,6 +876,29 @@ else
     saveDiamondTally()
     print("Initial diamond tally: " .. atm.diamondTally)
 end
+
+function uniCardInit()
+    local timestamp = os.epoch("utc")
+
+    atm.sendRequest({
+        data = {
+            requestType = "GET_UNICARD_KEY",
+            timestamp = timestamp
+        },
+        timestamp = timestamp
+    })
+
+    local response, err = atm.waitForResponse(10)
+
+    if response and response.success then
+        unicard.init(response.privateKey, response.publicKey, 200, serviceId)
+    else
+        print(textutils.serialize(response))
+        error("BAD RESPONSE")
+    end
+end
+uniCardInit()
+
 
 basalt.schedule(function()
     -- Background task to blink redstone when storage is empty and detect theft
@@ -908,7 +932,6 @@ basalt.schedule(function()
             
             -- Update the theft details label continuously
             theftDetailsLabel:setText(diamondsInStorage .. " diamonds found, " .. absDiff .. " " .. moreOrLess .. " than expected!")
-            
             -- Sound alarm - diamonds don't match expected!
             if cardReader then
                 cardReader.beep(440)
@@ -970,26 +993,5 @@ basalt.schedule(function()
     end
 end)
 
--- Initialize UniCard client
-function initUnicard()
-    local timestamp = os.epoch("utc")
-
-    atm.sendRequest({
-        data = {
-            requestType = "GET_UNICARD_KEY",
-            timestamp = timestamp
-        },
-        timestamp = timestamp
-    })
-
-    local keys, err = atm.waitForResponse(10)
-
-    if keys and keys.success then
-        unicard.init(keys.privateKey, keys.publicKey)
-        print("UniCard client initialized")
-    else
-        error((keys and keys.error) or err or "Failed to initialize UniCard client")
-    end
-end
 
 basalt.run()

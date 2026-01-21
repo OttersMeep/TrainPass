@@ -1,6 +1,5 @@
--- UniCard Server
--- Secure key-value storage for payment cards
--- Each key can only be modified by the application that created it
+-- If you're setting this up and someone already has a UniCard server on 200, change this! 
+serverChannel = 200
 
 local ecc = require("ecc")
 local unicardServer = {}
@@ -11,7 +10,7 @@ unicardServer.services = {}  -- serviceId -> { publicKey, allowedKeys, createdAt
 
 -- Configuration
 unicardServer.config = {
-    serverChannel = 200,
+    serverChannel = serverChannel,
     modem = nil,
     dataFile = "unicard_data.dat"
 }
@@ -128,7 +127,7 @@ local function handleGetField(serviceId,request)
     }
 end
 
-local function checkOwnership(serviceId, fieldName)
+function checkOwnership(serviceId, fieldName)
     serviceId = tostring(serviceId or "")
     local svc = unicardServer.services[serviceId]
     if not svc then
@@ -225,21 +224,17 @@ local function handleListField(request)
 end
 
 -- Handle incoming request
-local function handleRequest(request, replyChannel)
-    -- Route to appropriate handler
+local function handleRequest(serviceId, request, replyChannel)
     if request.requestType == "GET_FIELD" then
-        return handleGetField(request)
+        return handleGetField(serviceId, request)
     elseif request.requestType == "SET_FIELD" then
-        return handleSetField(request)
+        return handleSetField(serviceId, request)
     elseif request.requestType == "DELETE_FIELD" then
-        return handleDeleteField(request)
+        return handleDeleteField(serviceId, request)
     elseif request.requestType == "LIST_FIELD" then
         return handleListField(request)
     else
-        return {
-            success = false,
-            error = "Unknown request type: " .. tostring(request.requestType)
-        }
+        return { success = false, error = "Unknown request type: " .. tostring(request.requestType) }
     end
 end
 
@@ -435,12 +430,18 @@ local function runServerLoop()
             local request = textutils.unserialize(message)
             if request.serviceId then
                 print(request.serviceId)
-                print(textutils.serialise(unicardServer.services))
                 service = unicardServer.services[request.serviceId]
                 decryption = ecc.exchange(unicardServer.privateKey,service.publicKey)
-                packet = ecc.decrypt(request.encryptedData,decryption)
-                print(packet)
-                local response = handleRequest(packet,replyChannel)
+                local decrypted = ecc.decrypt(request.encryptedData, decryption)
+                if type(decrypted) == "table" then
+                    local chars = {}
+                    for i = 1, #decrypted do chars[i] = string.char(decrypted[i]) end
+                    decrypted = table.concat(chars)
+                end
+                local packet = textutils.unserialize(decrypted) or {}
+                local response = handleRequest(request.serviceId, packet, replyChannel)
+                print(textutils.serialise(response))
+
                 unicardServer.config.modem.transmit(replyChannel,channel,textutils.serialise({success = true, encryptedData = ecc.encrypt(textutils.serialize(response),decryption)}))
             end
         end

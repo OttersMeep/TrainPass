@@ -85,13 +85,20 @@ local function sendRequest(requestData)
             if packet and type(packet) == "table" and packet.encryptedData then
                 local success, decrypted = pcall(ecc.decrypt, packet.encryptedData, sharedSecret)
                 if success then
-                    return true,decrypted
+                    if type(decrypted) == "table" then
+                        local chars = {}
+                        for i = 1, #decrypted do chars[i] = string.char(decrypted[i]) end
+                        decrypted = table.concat(chars)
+                    end
+                    local decoded = textutils.unserialize(decrypted) or {}
+                    return decoded.success ~= false, decoded
                 else
                     return nil, "Decryption failed"
                 end
             end
 
-            return packet
+            return false, packet
+
         elseif event == "timer" and p1 == timer then
             unicard.config.modem.close(responseChannel)
             return nil, "Timeout"
