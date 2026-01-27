@@ -1,13 +1,10 @@
+-- Not My (ottersmeep's) code. By Anavrins on the now unusable CC forums
+
+
 -- Elliptic Curve Cryptography in Computercraft
 
 
 -- Small tweaks from SquidDev's illuaminate (https://github.com/SquidDev/illuaminate/)
-
--- This is NOT my (ottersmee's) code
--- The code belongs to a member of the ComputerCraft forums I cannot find the username of
--- as the forums have been taken offline due to hosting issues
-
--- If you know the original author, please tell me so that I can credit them!
 
 local byteTableMT = {
     __tostring = function(a) return string.char(unpack(a)) end,
